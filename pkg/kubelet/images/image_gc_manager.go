@@ -67,6 +67,8 @@ type ImageGCPolicy struct {
 	MinAge time.Duration
 }
 
+//用于缓存当前节点使用的镜像信息，
+//并在 Start() 方法中启动两个 goroutine 周期性地去更新缓存的内容。
 type realImageGCManager struct {
 	// Container runtime
 	runtime container.Runtime
@@ -243,8 +245,13 @@ func (im *realImageGCManager) detectImages(detectTime time.Time) error {
 	return nil
 }
 
+//逻辑：
+//调用 cAdvisor 接口获取镜像所在磁盘的文件系统信息，根据当前的使用量和配置的 GC 策略确定是否需要进行清理
+//如果需要清理，计算需要清理的总大小，调用 freeSpace 进行镜像清理工作
+//把所有可以清理的镜像根据使用时间进行排序，进行逐个清理，知道清理的镜像总大小满足需求才停止
 func (im *realImageGCManager) GarbageCollect() error {
 	// Get disk usage on disk holding images.
+	// 从 cadvisor 中获取镜像所在文件系统的信息，包括磁盘的容量和当前的使用量
 	fsInfo, err := im.cadvisor.ImagesFsInfo()
 	if err != nil {
 		return err
@@ -264,10 +271,12 @@ func (im *realImageGCManager) GarbageCollect() error {
 	}
 
 	// If over the max threshold, free enough to place us at the lower threshold.
+	// 如果镜像的磁盘使用率达到了设定的最高阈值，就进行清理工作，直到使用率
 	usagePercent := 100 - int(available*100/capacity)
 	if usagePercent >= im.policy.HighThresholdPercent {
 		amountToFree := capacity*int64(100-im.policy.LowThresholdPercent)/100 - available
 		glog.Infof("[imageGCManager]: Disk usage on %q (%s) is at %d%% which is over the high threshold (%d%%). Trying to free %d bytes", fsInfo.Device, fsInfo.Mountpoint, usagePercent, im.policy.HighThresholdPercent, amountToFree)
+		//进行清除
 		freed, err := im.freeSpace(amountToFree, time.Now())
 		if err != nil {
 			return err
@@ -275,6 +284,7 @@ func (im *realImageGCManager) GarbageCollect() error {
 
 		if freed < amountToFree {
 			err := fmt.Errorf("failed to garbage collect required amount of images. Wanted to free %d, but freed %d", amountToFree, freed)
+			//通知apiserver失败的原因
 			im.recorder.Eventf(im.nodeRef, api.EventTypeWarning, events.FreeDiskSpaceFailed, err.Error())
 			return err
 		}
@@ -293,7 +303,9 @@ func (im *realImageGCManager) DeleteUnusedImages() (int64, error) {
 // bytes freed is always returned.
 // Note that error may be nil and the number of bytes free may be less
 // than bytesToFree.
+// 清除废旧镜像
 func (im *realImageGCManager) freeSpace(bytesToFree int64, freeTime time.Time) (int64, error) {
+	// 更新镜像记录列表中的数据，添加刚发现的镜像，移除已经不存在的镜像
 	err := im.detectImages(freeTime)
 	if err != nil {
 		return 0, err
@@ -310,14 +322,17 @@ func (im *realImageGCManager) freeSpace(bytesToFree int64, freeTime time.Time) (
 			imageRecord: *record,
 		})
 	}
+	// 根据镜像的最近使用时间和最近发现时间进行排序
 	sort.Sort(byLastUsedAndDetected(images))
 
 	// Delete unused images until we've freed up enough space.
+	//删除不再使用的镜像直至腾出足够的存储空间
 	var deletionErrors []error
 	spaceFreed := int64(0)
 	for _, image := range images {
 		glog.V(5).Infof("Evaluating image ID %s for possible garbage collection", image.id)
 		// Images that are currently in used were given a newer lastUsed.
+		// 忽略正在被使用的镜像
 		if image.lastUsed.Equal(freeTime) || image.lastUsed.After(freeTime) {
 			glog.V(5).Infof("Image ID %s has lastUsed=%v which is >= freeTime=%v, not eligible for garbage collection", image.id, image.lastUsed, freeTime)
 			break
@@ -325,7 +340,7 @@ func (im *realImageGCManager) freeSpace(bytesToFree int64, freeTime time.Time) (
 
 		// Avoid garbage collect the image if the image is not old enough.
 		// In such a case, the image may have just been pulled down, and will be used by a container right away.
-
+		// 略过最近使用时间距离现在小于设置的 MinAge 的镜像
 		if freeTime.Sub(image.firstDetected) < im.policy.MinAge {
 			glog.V(5).Infof("Image ID %s has age %v which is less than the policy's minAge of %v, not eligible for garbage collection", image.id, freeTime.Sub(image.firstDetected), im.policy.MinAge)
 			continue
@@ -333,6 +348,7 @@ func (im *realImageGCManager) freeSpace(bytesToFree int64, freeTime time.Time) (
 
 		// Remove image. Continue despite errors.
 		glog.Infof("[imageGCManager]: Removing image %q to free %d bytes", image.id, image.size)
+		// 删除镜像并更新 imageRecords 对象中缓存的镜像信息，记录删除的镜像大小
 		err := im.runtime.RemoveImage(container.ImageSpec{Image: image.id})
 		if err != nil {
 			deletionErrors = append(deletionErrors, err)
@@ -340,7 +356,7 @@ func (im *realImageGCManager) freeSpace(bytesToFree int64, freeTime time.Time) (
 		}
 		delete(im.imageRecords, image.id)
 		spaceFreed += image.size
-
+		// 如果删除的镜像大小满足需求，停止继续删除，达到了policy的标准
 		if spaceFreed >= bytesToFree {
 			break
 		}

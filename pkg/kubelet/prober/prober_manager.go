@@ -39,6 +39,7 @@ import (
 type Manager interface {
 	// AddPod creates new probe workers for every container probe. This should be called for every
 	// pod created.
+	//在每次创建新 pod 的时候，kubelet 都会调用
 	AddPod(pod *api.Pod)
 
 	// RemovePod handles cleaning up the removed pod state, including terminating probe workers and
@@ -57,6 +58,12 @@ type Manager interface {
 	Start()
 }
 
+//probeManager 检测 pod 中容器的健康状态，
+//目前有两种 probe：readiness 和 liveness。
+//readinessProbe 检测容器是否可以接受请求，
+//如果检测结果失败，则将其从 service 的 endpoints 中移除，后续的请求也就不会发送给这个容器；
+//livenessProbe 检测容器是否存活，如果检测结果失败，
+//kubelet 会杀死这个容器，并重启一个新的（除非 RestartPolicy 设置成了 Never）。
 type manager struct {
 	// Map of active workers for probes
 	workers map[probeKey]*worker
@@ -132,6 +139,8 @@ func (m *manager) AddPod(pod *api.Pod) {
 	defer m.workerLock.Unlock()
 
 	key := probeKey{podUID: pod.UID}
+	//遍历 pod 中的容器，如果其定义了 readiness 或者 liveness，就创建一个 worker，
+	//并启动一个 goroutine 在后台运行这个 worker。
 	for _, c := range pod.Spec.Containers {
 		key.containerName = c.Name
 
@@ -144,6 +153,7 @@ func (m *manager) AddPod(pod *api.Pod) {
 			}
 			w := newWorker(m, readiness, pod, c)
 			m.workers[key] = w
+			//运行worker
 			go w.run()
 		}
 
@@ -156,6 +166,7 @@ func (m *manager) AddPod(pod *api.Pod) {
 			}
 			w := newWorker(m, liveness, pod, c)
 			m.workers[key] = w
+			//运行worker
 			go w.run()
 		}
 	}

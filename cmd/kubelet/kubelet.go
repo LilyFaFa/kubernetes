@@ -36,6 +36,7 @@ import (
 )
 
 func main() {
+	//创建一个kubeletServer，kubeletServer对kubelet运行的所有参数进行了封装。
 	s := options.NewKubeletServer()
 	s.AddFlags(pflag.CommandLine)
 
@@ -44,7 +45,7 @@ func main() {
 	defer logs.FlushLogs()
 
 	verflag.PrintAndExitIfRequested()
-
+	//运行实际的kubelet，这个方法会一直运行，正常情况下不会退出。
 	if err := app.Run(s, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

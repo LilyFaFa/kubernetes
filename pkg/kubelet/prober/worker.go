@@ -141,6 +141,7 @@ func (w *worker) doProbe() (keepGoing bool) {
 	defer func() { recover() }() // Actually eat panics (HandleCrash takes care of logging)
 	defer runtime.HandleCrash(func(_ interface{}) { keepGoing = true })
 
+	// pod 没有被创建，或者已经被删除了，直接跳过检测，但是会继续检测
 	status, ok := w.probeManager.statusManager.GetPodStatus(w.pod.UID)
 	if !ok {
 		// Either the pod has not been created yet, or it was already deleted.
@@ -149,12 +150,13 @@ func (w *worker) doProbe() (keepGoing bool) {
 	}
 
 	// Worker should terminate if pod is terminated.
+	// pod 已经退出（不管是成功还是失败），直接返回，并终止 worker
 	if status.Phase == api.PodFailed || status.Phase == api.PodSucceeded {
 		glog.V(3).Infof("Pod %v %v, exiting probe worker",
 			format.Pod(w.pod), status.Phase)
 		return false
 	}
-
+	// 容器没有创建，或者已经删除了，直接返回，并继续检测，等待更多的信息
 	c, ok := api.GetContainerStatus(status.ContainerStatuses, w.container.Name)
 	if !ok || len(c.ContainerID) == 0 {
 		// Either the container has not been created yet, or it was deleted.
@@ -162,7 +164,7 @@ func (w *worker) doProbe() (keepGoing bool) {
 			format.Pod(w.pod), w.container.Name)
 		return true // Wait for more information.
 	}
-
+	// pod 更新了容器，使用最新的容器信息
 	if w.containerID.String() != c.ContainerID {
 		if !w.containerID.IsEmpty() {
 			w.resultsManager.Remove(w.containerID)
@@ -185,14 +187,16 @@ func (w *worker) doProbe() (keepGoing bool) {
 			w.resultsManager.Set(w.containerID, results.Failure, w.pod)
 		}
 		// Abort if the container will not be restarted.
+		// 容器失败退出，并且不会再重启，终止 worker
 		return c.State.Terminated == nil ||
 			w.pod.Spec.RestartPolicy != api.RestartPolicyNever
 	}
-
+	// 容器启动时间太短，没有超过配置的初始化等待时间 InitialDelaySeconds
 	if int32(time.Since(c.State.Running.StartedAt.Time).Seconds()) < w.spec.InitialDelaySeconds {
 		return true
 	}
 
+	// 调用 prober 进行检测容器的状态
 	result, err := w.probeManager.prober.probe(w.probeType, w.pod, status, w.container, w.containerID)
 	if err != nil {
 		// Prober error, throw away the result.
@@ -205,12 +209,13 @@ func (w *worker) doProbe() (keepGoing bool) {
 		w.lastResult = result
 		w.resultRun = 1
 	}
-
+	// 如果容器退出，并且没有超过最大的失败次数，则继续检测
 	if (result == results.Failure && w.resultRun < int(w.spec.FailureThreshold)) ||
 		(result == results.Success && w.resultRun < int(w.spec.SuccessThreshold)) {
 		// Success or failure is below threshold - leave the probe state unchanged.
 		return true
 	}
+	// 保存最新的检测结果
 
 	w.resultsManager.Set(w.containerID, result, w.pod)
 
@@ -219,6 +224,7 @@ func (w *worker) doProbe() (keepGoing bool) {
 		// Stop probing until we see a new container ID. This is to reduce the
 		// chance of hitting #21751, where running `docker exec` when a
 		// container is being stopped may lead to corrupted container state.
+		// 容器 liveness 检测失败，需要删除容器并重新创建，在新容器成功创建出来之前，暂停检测
 		w.onHold = true
 	}
 

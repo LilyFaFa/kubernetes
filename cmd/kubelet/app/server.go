@@ -266,6 +266,7 @@ func initKubeletConfigSync(s *options.KubeletServer) (*componentconfig.KubeletCo
 // The kubeDeps argument may be nil - if so, it is initialized from the settings on KubeletServer.
 // Otherwise, the caller is assumed to have set up the KubeletDeps object and a default one will
 // not be generated.
+// kubeDeps如果是空的，那么就使用kubeletServer的配置
 func Run(s *options.KubeletServer, kubeDeps *kubelet.KubeletDeps) error {
 	if err := run(s, kubeDeps); err != nil {
 		return fmt.Errorf("failed to run Kubelet: %v", err)
@@ -355,6 +356,8 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.KubeletDeps) (err error) {
 	}
 
 	if kubeDeps == nil {
+		//run函数Deps是空的,我们要生成默认的对象，该if语句是对其进行参数填充
+		//构建两个client，用于和apiserver通信。
 		var kubeClient, eventClient *clientset.Clientset
 		var cloud cloudprovider.Interface
 
@@ -379,9 +382,10 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.KubeletDeps) (err error) {
 				return err
 			}
 		}
-
+		//创建一个APIServerClientConfig，用于创建kubeClient和eventClient
 		clientConfig, err := CreateAPIServerClientConfig(s)
 		if err == nil {
+			//kubeclient用于和apiserver进行交互
 			kubeClient, err = clientset.NewForConfig(clientConfig)
 			if err != nil {
 				glog.Warningf("New kubeClient from clientConfig error: %v", err)
@@ -405,7 +409,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.KubeletDeps) (err error) {
 		if err != nil {
 			return err
 		}
-
+		//将之前创建的对象赋给kubeDeps
 		kubeDeps.Cloud = cloud
 		kubeDeps.KubeClient = kubeClient
 		kubeDeps.EventClient = eventClient
@@ -423,6 +427,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.KubeletDeps) (err error) {
 		kubeDeps.Auth = auth
 	}
 
+	//  创建 cAdvisor 对象，负责收集容器的监控信息
 	if kubeDeps.CAdvisorInterface == nil {
 		kubeDeps.CAdvisorInterface, err = cadvisor.New(uint(s.CAdvisorPort), s.ContainerRuntime, s.RootDirectory)
 		if err != nil {
@@ -430,6 +435,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.KubeletDeps) (err error) {
 		}
 	}
 
+	//  创建 ContainerManager 对象
 	if kubeDeps.ContainerManager == nil {
 		if s.SystemCgroups != "" && s.CgroupRoot == "" {
 			return fmt.Errorf("invalid configuration: system container was specified and cgroup root was not specified")
@@ -468,11 +474,17 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.KubeletDeps) (err error) {
 	if err := oomAdjuster.ApplyOOMScoreAdj(0, int(s.OOMScoreAdj)); err != nil {
 		glog.Warning(err)
 	}
-
+	// 运行 kubelet，这个函数会启动 goroutine 一直运行，是 kubelet 核心功能执行的地方,
+	// 前面构建的kubeDeps这个对象被传了过来
+	// 的名字听起来很奇怪，其实它内部保存了 kubelet 各个重要组件的对象，
+	// 之所以要把它作为参数传递，是为了实现 dependency injection。
+	// 简单地说，就是把 kubelet 依赖的组件对象作为参数传进来，这样可以控制 kubelet 的行为。
+	// 比如在测试的时候，只要构建 fake 的组件实现，就能很轻松进行测试。
+	// 继续分析这个run函数
 	if err := RunKubelet(&s.KubeletConfiguration, kubeDeps, s.RunOnce, standaloneMode); err != nil {
 		return err
 	}
-
+	// 运行 healthz HTTP 服务
 	if s.HealthzPort > 0 {
 		healthz.DefaultHealthz()
 		go wait.Until(func() {
@@ -658,9 +670,16 @@ func RunKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *kubelet
 	if err != nil {
 		return err
 	}
-
+	//1、 一些初始化的工作，配置 eventBroadcaster，这样就能给apiserver发送事件了
+	//事件广播器
 	eventBroadcaster := record.NewBroadcaster()
+	//事件机制
+	//NewRecorder 新建了一个 Recoder 对象，通过它的 Event、Eventf 和 PastEventf 方法，用户可以往里面发送事件
 	kubeDeps.Recorder = eventBroadcaster.NewRecorder(api.EventSource{Component: "kubelet", Host: string(nodeName)})
+	//StartLogging 和 StartRecordingToSink创建了两个不同的事件处理函数，
+	//分别把事件记录到日志和发送给 apiserver
+	//eventBroadcaster 会把接收到的事件发送个多个处理函数，
+	//比如这里提到的写日志和发送到 apiserver
 	eventBroadcaster.StartLogging(glog.V(3).Infof)
 	if kubeDeps.EventClient != nil {
 		glog.V(4).Infof("Sending events to api server.")
@@ -699,6 +718,7 @@ func RunKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *kubelet
 	credentialprovider.SetPreferredDockercfgPath(kubeCfg.RootDirectory)
 	glog.V(2).Infof("Using root directory: %v", kubeCfg.RootDirectory)
 
+	//2、 使用 Builder 创建 kubelet (mainKubelet)，默认使用 `CreateAndInitKubelet`
 	builder := kubeDeps.Builder
 	if builder == nil {
 		builder = CreateAndInitKubelet
@@ -757,12 +777,14 @@ func RunKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *kubelet
 	}
 
 	// process pods and exit.
+	//3、 运行 kubelet
 	if runOnce {
 		if _, err := k.RunOnce(podCfg.Updates()); err != nil {
 			return fmt.Errorf("runonce failed: %v", err)
 		}
 		glog.Infof("Started kubelet %s as runonce", version.Get().String())
 	} else {
+		// 启动kubelet，分析运行
 		err := startKubelet(k, podCfg, kubeCfg, kubeDeps)
 		if err != nil {
 			return err
@@ -774,11 +796,14 @@ func RunKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *kubelet
 
 func startKubelet(k kubelet.KubeletBootstrap, podCfg *config.PodConfig, kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *kubelet.KubeletDeps) error {
 	// start the kubelet
+	// 启动kubelet，来进入主循环
+	// 上文说过，podCfg.Updates()是一个管道，会实时地发送过来 pod 最新的配置信息
 	go wait.Until(func() { k.Run(podCfg.Updates()) }, 0, wait.NeverStop)
 
 	// start the kubelet server
 	if kubeCfg.EnableServer {
 		go wait.Until(func() {
+			// 启动 kubelet 的 API 服务
 			k.ListenAndServe(net.ParseIP(kubeCfg.Address), uint(kubeCfg.Port), kubeDeps.TLSOptions, kubeDeps.Auth, kubeCfg.EnableDebuggingHandlers)
 		}, 0, wait.NeverStop)
 	}
@@ -794,14 +819,19 @@ func startKubelet(k kubelet.KubeletBootstrap, podCfg *config.PodConfig, kubeCfg 
 func CreateAndInitKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *kubelet.KubeletDeps, standaloneMode bool) (k kubelet.KubeletBootstrap, err error) {
 	// TODO: block until all sources have delivered at least one update to the channel, or break the sync loop
 	// up into "per source" synchronizations
-
+	// 调用 pkg/kubelet/kubelet.go 文件创建 MainKubelet 的代码
+	// 看这部分创建kubelet代码
 	k, err = kubelet.NewMainKubelet(kubeCfg, kubeDeps, standaloneMode)
 	if err != nil {
 		return nil, err
 	}
-
+	// 发送一个事件，宣告 kubelet 已经成功启动
 	k.BirthCry()
-
+	// 启动GC垃圾回收
+	// 分析垃圾回收的机制
+	//默认情况下，container GC 是每分钟进行一次，image GC 是每五分钟一次，如果有不同的需要，可以通过 kubelet 的启动参数进行修改
+	//不要手动清理镜像和容器，因为 kubelet 运行的时候会保存当前节点上镜像和容器的缓存，并定时更新。手动清理镜像和容器会让 kubelet 做出误判，带来不确定的问题
+	//不是 kubelet 管理的容器不在 GC 的范围内，也就是说用户手动通过 docker 创建的容器不会被 kubelet 删除
 	k.StartGarbageCollection()
 
 	return k, nil

@@ -64,19 +64,24 @@ type KubeletServer struct {
 }
 
 // NewKubeletServer will create a new KubeletServer with default values.
+// 使用默认值创建一个kubeletserver
 func NewKubeletServer() *KubeletServer {
 	versioned := &v1alpha1.KubeletConfiguration{}
 	api.Scheme.Default(versioned)
 	config := componentconfig.KubeletConfiguration{}
 	api.Scheme.Convert(versioned, &config, nil)
 	return &KubeletServer{
-		KubeConfig:           flag.NewStringFlag("/var/lib/kubelet/kubeconfig"),
+		//kubeconfig	的文件路径
+		KubeConfig: flag.NewStringFlag("/var/lib/kubelet/kubeconfig"),
+		//如果是true，那么错误的kubeconfig将会直接导致kubelet退出
 		RequireKubeConfig:    false, // in 1.5, default to true
 		KubeletConfiguration: config,
 	}
 }
 
 // AddFlags adds flags for a specific KubeletServer to the specified FlagSet
+//它的唯一作用就是把命令行参数和它的字段一一对应起来。这样解析命令行参数的时候，就更新对应的字段。
+//这里是所有命令行参数定义的地方，如果要查询某个版本提供了哪些命令行，我会阅读这部分内容。
 func (s *KubeletServer) AddFlags(fs *pflag.FlagSet) {
 	// TODO(#34726:1.8.0): Remove the opt-in for failing when swap is enabled.
 	fs.BoolVar(&s.ExperimentalFailSwapOn, "experimental-fail-swap-on", s.ExperimentalFailSwapOn, "Makes the Kubelet fail to start if swap is enabled on the node. This is a temporary opton to maintain legacy behavior, failing due to swap enabled will happen by default in v1.6.")

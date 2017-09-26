@@ -177,6 +177,11 @@ func (cgc *containerGC) evictableContainers(minAge time.Duration) (containersByE
 }
 
 // GarbageCollect removes dead containers using the specified container gc policy
+// 根据policy回收容器
+// 函数逻辑:
+// 1)先从正在运行的容器中找到可以被清理的，包括符合清理条件或者不被 kubelet 识别的容器
+// 2)直接删除不能识别的容器，以及 pod 信息已经不存在的容器
+// 3)根据配置的容器删除策略，对剩下的容器进行删除
 func (cgc *containerGC) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy, allSourcesReady bool) error {
 	// Separate containers by evict units.
 	evictUnits, unidentifiedContainers, err := cgc.evictableContainers(gcPolicy.MinAge)
@@ -185,6 +190,7 @@ func (cgc *containerGC) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy,
 	}
 
 	// Remove unidentified containers.
+	// 移出未定义的容器，已经无法识别的容器
 	for _, container := range unidentifiedContainers {
 		glog.Infof("Removing unidentified dead container %q with ID %q", container.name, container.id)
 		err = cgc.client.RemoveContainer(container.id, dockertypes.ContainerRemoveOptions{RemoveVolumes: true})
@@ -194,6 +200,7 @@ func (cgc *containerGC) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy,
 	}
 
 	// Remove deleted pod containers if all sources are ready.
+	// 移出被删除的pod的容器，pod已经被删除,则将容器删除
 	if allSourcesReady {
 		for key, unit := range evictUnits {
 			if cgc.isPodDeleted(key.uid) {
@@ -202,13 +209,15 @@ func (cgc *containerGC) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy,
 			}
 		}
 	}
-
+	// 执行 GC 策略，保证每个 POD 最多只能保存 MaxPerPodContainer 个已经退出的容器
 	// Enforce max containers per evict unit.
 	if gcPolicy.MaxPerPodContainer >= 0 {
 		cgc.enforceMaxContainersPerEvictUnit(evictUnits, gcPolicy.MaxPerPodContainer)
 	}
 
 	// Enforce max total number of containers.
+	// 执行 GC 策略，保证节点上最多有 MaxContainers 个已经退出的容器
+	// 先把最大容器数量平分到 pod，保证每个 pod 在平均数量以下；如果还不满足要求的数量，就按照时间顺序先删除最旧的容器
 	if gcPolicy.MaxContainers >= 0 && evictUnits.NumContainers() > gcPolicy.MaxContainers {
 		// Leave an equal number of containers per evict unit (min: 1).
 		numContainersPerEvictUnit := gcPolicy.MaxContainers / evictUnits.NumEvictUnits()
@@ -218,6 +227,7 @@ func (cgc *containerGC) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy,
 		cgc.enforceMaxContainersPerEvictUnit(evictUnits, numContainersPerEvictUnit)
 
 		// If we still need to evict, evict oldest first.
+		// 如果还不满足数量要求，按照容器进行删除，先删除最老的
 		numContainers := evictUnits.NumContainers()
 		if numContainers > gcPolicy.MaxContainers {
 			flattened := make([]containerGCInfo, 0, numContainers)

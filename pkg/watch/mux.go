@@ -179,6 +179,7 @@ func (m *Broadcaster) closeAll() {
 
 // Action distributes the given event among all watchers.
 func (m *Broadcaster) Action(action EventType, obj runtime.Object) {
+	//把对象封装一下，发送到 m.incoming 管道
 	m.incoming <- Event{action, obj}
 }
 

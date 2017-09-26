@@ -52,6 +52,7 @@ type realContainerGC struct {
 }
 
 // New ContainerGC instance with the specified policy.
+// 根据ContainerGCPolicy创建ContainerGC
 func NewContainerGC(runtime Runtime, policy ContainerGCPolicy) (ContainerGC, error) {
 	if policy.MinAge < 0 {
 		return nil, fmt.Errorf("invalid minimum garbage collection age: %v", policy.MinAge)
@@ -63,6 +64,10 @@ func NewContainerGC(runtime Runtime, policy ContainerGCPolicy) (ContainerGC, err
 	}, nil
 }
 
+//容器GC，
 func (cgc *realContainerGC) GarbageCollect(allSourcesReady bool) error {
+	//调用runtime的GC
+	//对于 docker 来说，对应的代码是 pkg/kubelet/dockertools/docker_manager.go
+	//可以分析一下docker runtime的gc
 	return cgc.runtime.GarbageCollect(cgc.policy, allSourcesReady)
 }

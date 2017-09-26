@@ -326,10 +326,17 @@ type EventCorrelateResult struct {
 //     the same reason.
 //   * Events are incrementally counted if the exact same event is encountered multiple
 //     times.
+//对事件做缓存
 func NewEventCorrelator(clock clock.Clock) *EventCorrelator {
 	cacheSize := maxLruCacheEntries
 	return &EventCorrelator{
+		//filterFunc过滤事件
 		filterFunc: DefaultEventFilterFunc,
+		//把相似的事件汇聚在一起
+		//如果在最近 10 分钟出现过 10 个相似的事件
+		//（除了 message 和时间戳之外其他关键字段都相同的事件），
+		//aggregator 会把它们的 message 设置为
+		//events with common reason combined，这样它们就完全一样了
 		aggregator: NewEventAggregator(
 			cacheSize,
 			EventAggregatorByReasonFunc,
@@ -337,7 +344,18 @@ func NewEventCorrelator(clock clock.Clock) *EventCorrelator {
 			defaultAggregateMaxEvents,
 			defaultAggregateIntervalInSeconds,
 			clock),
+		//把相同的事件记录到一起
+		//这个变量的名字有点奇怪，其实它会把相同的事件
+		//（除了时间戳之外其他字段都相同）变成同一个事件，
+		//通过增加事件的 Count 字段来记录该事件发生了多少次。
+		//经过 aggregator 的事件会在这里变成同一个事件
 		logger: newEventLogger(cacheSize, clock),
+		//aggregator 和 logger 都会在内部维护一个缓存（默认长度是 4096），
+		//事件的相似性和相同性比较是和缓存中的事件进行的，
+		//也就是说它并在乎 kubelet 启动之前的事件，
+		//而且如果事件超过 4096 的长度，最近没有被访问的事件也会被从缓存中移除。
+		//这也是这个文件中带有 cache 的原因。
+		//它们的内部实现并不复杂，有兴趣的读者请自行阅读相关源码。
 	}
 }
 

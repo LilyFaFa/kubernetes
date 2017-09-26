@@ -1933,6 +1933,9 @@ func (dm *DockerManager) createPodInfraContainer(pod *api.Pod) (kubecontainer.Do
 //   Infra Container should be killed, hence it's removed from this map.
 // - all init containers are stored in initContainersToKeep
 // - all running containers which are NOT contained in containersToKeep and initContainersToKeep should be killed.
+//这个结构体中的内容可以分成三部分：infrastructure 变化信息，
+//init containers 变化信息，
+//以及应用 containers 变化信息。
 type podContainerChangesSpec struct {
 	StartInfraContainer  bool
 	InfraChanged         bool
@@ -2095,12 +2098,22 @@ func (dm *DockerManager) computePodContainerChanges(pod *api.Pod, podStatus *kub
 }
 
 // Sync the running pod to match the specified desired pod.
+//这个方法的内容非常多，
+//它的主要逻辑是先比较传递过来的 pod 信息和实际运行的 pod（对于新建 pod 来说后者为空），
+//计算出两者的差别，也就是需要更新的地方。
+//然后先创建 infrastructure 容器，配置好网络，然后再逐个创建应用容器。
+//容器创建就是根据配置得到 docker client 新建容器需要的所有参数，最终发送给 docker API，
 func (dm *DockerManager) SyncPod(pod *api.Pod, _ api.PodStatus, podStatus *kubecontainer.PodStatus, pullSecrets []api.Secret, backOff *flowcontrol.Backoff) (result kubecontainer.PodSyncResult) {
 	start := time.Now()
 	defer func() {
 		metrics.ContainerManagerLatency.WithLabelValues("SyncPod").Observe(metrics.SinceInMicroseconds(start))
 	}()
-
+	//计算容器的变化
+	//根据最新拿到的 pod 配置，和目前实际运行的容器对比，计算出其中的变化，
+	//得到需要重新启动的容器信息。
+	//不管是创建、更新还是删除 pod，最终都会调用 syncPod 方法，
+	//所以这个结果涵盖了所有的可能性。
+	//看一下这个函数
 	containerChanges, err := dm.computePodContainerChanges(pod, podStatus)
 	if err != nil {
 		result.Fail(err)
@@ -2111,6 +2124,7 @@ func (dm *DockerManager) SyncPod(pod *api.Pod, _ api.PodStatus, podStatus *kubec
 	if containerChanges.InfraChanged {
 		dm.recorder.Eventf(pod, api.EventTypeNormal, "InfraChanged", "Pod infrastructure changed, it will be killed and re-created.")
 	}
+	// 如果需要，先删除运行的容器
 	if containerChanges.StartInfraContainer || (len(containerChanges.ContainersToKeep) == 0 && len(containerChanges.ContainersToStart) == 0) {
 		if len(containerChanges.ContainersToKeep) == 0 && len(containerChanges.ContainersToStart) == 0 {
 			glog.V(4).Infof("Killing Infra Container for %q because all other containers are dead.", format.Pod(pod))
@@ -2171,12 +2185,16 @@ func (dm *DockerManager) SyncPod(pod *api.Pod, _ api.PodStatus, podStatus *kubec
 	}
 
 	// If we should create infra container then we do it first.
+	// 先创建 infrastructure 容器
 	podInfraContainerID := containerChanges.InfraContainerId
 	if containerChanges.StartInfraContainer && (len(containerChanges.ContainersToStart) > 0) {
 		glog.V(4).Infof("Creating pod infra container for %q", format.Pod(pod))
 		startContainerResult := kubecontainer.NewSyncResult(kubecontainer.StartContainer, PodInfraContainerName)
 		result.AddSyncResult(startContainerResult)
 		var msg string
+		// 通过 docker 创建出来一个运行的 pause 容器。
+		// 如果镜像不存在，kubelet 会先下载 pause 镜像；
+		// 如果 pod 是主机模式，容器也是；其他情况下，容器会使用 None 网络模式，让 kubelet 的网络插件自己进行网络配置。
 		podInfraContainerID, err, msg = dm.createPodInfraContainer(pod)
 		if err != nil {
 			startContainerResult.Fail(err, msg)
@@ -2186,6 +2204,7 @@ func (dm *DockerManager) SyncPod(pod *api.Pod, _ api.PodStatus, podStatus *kubec
 
 		setupNetworkResult := kubecontainer.NewSyncResult(kubecontainer.SetupNetwork, kubecontainer.GetPodFullName(pod))
 		result.AddSyncResult(setupNetworkResult)
+		// 配置 infrastructure 基础容器的网络
 		if !kubecontainer.IsHostNetworkPod(pod) {
 			glog.V(3).Infof("Calling network plugin %s to setup pod for %s", dm.networkPlugin.Name(), format.Pod(pod))
 			err = dm.networkPlugin.SetUpPod(pod.Namespace, pod.Name, podInfraContainerID.ContainerID())
@@ -2298,6 +2317,7 @@ func (dm *DockerManager) SyncPod(pod *api.Pod, _ api.PodStatus, podStatus *kubec
 	}
 
 	// Start regular containers
+	// 启动正常的容器
 	for idx := range containerChanges.ContainersToStart {
 		container := &pod.Spec.Containers[idx]
 		startContainerResult := kubecontainer.NewSyncResult(kubecontainer.StartContainer, container.Name)
@@ -2589,6 +2609,7 @@ func (dm *DockerManager) GetPodContainerID(pod *kubecontainer.Pod) (kubecontaine
 }
 
 // Garbage collection of dead containers
+// 回收容器
 func (dm *DockerManager) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy, allSourcesReady bool) error {
 	return dm.containerGC.GarbageCollect(gcPolicy, allSourcesReady)
 }

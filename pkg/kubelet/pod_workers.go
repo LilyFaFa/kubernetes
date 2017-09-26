@@ -163,6 +163,7 @@ func (p *podWorkers) managePodLoop(podUpdates <-chan UpdatePodOptions) {
 			if err != nil {
 				return err
 			}
+			//同步 pod，sysPodFn实际上是kubelet.SyncPod
 			err = p.syncPodFn(syncPodOptions{
 				mirrorPod:      update.MirrorPod,
 				pod:            update.Pod,
@@ -199,6 +200,12 @@ func (p *podWorkers) UpdatePod(options *UpdatePodOptions) {
 
 	p.podLock.Lock()
 	defer p.podLock.Unlock()
+	// podUpdates字典保存了一个字典，每个 pod 的 id 作为 key，
+	// 而类型为 UpdatePodOptions 的管道作为 value 传递 pod 信息。
+	// 检测是否存在这个pod，因为这里的新建的 pod 所以会调用 p.managePodLoop() 方法作为 goroutine 运行更新工作
+	// 也就是说对于管理的每个 pod，podWorkers 都会启动一个 goroutine 在后台执行，
+	// 除此之外，它还会更新 podUpdate 和 isWorking，
+	// 填入新 pod 的信息，并往 podUpdates 管道中发送接收到的 pod 选项信息。
 	if podUpdates, exists = p.podUpdates[uid]; !exists {
 		// We need to have a buffer here, because checkForUpdates() method that
 		// puts an update into channel is called from the same goroutine where
@@ -213,6 +220,8 @@ func (p *podWorkers) UpdatePod(options *UpdatePodOptions) {
 		// comment in syncPod.
 		go func() {
 			defer runtime.HandleCrash()
+			//因为这里的新建的 pod 所以会调用 p.managePodLoop() 方法作为 goroutine 运行更新工作
+			//看一下这个函数
 			p.managePodLoop(podUpdates)
 		}()
 	}
