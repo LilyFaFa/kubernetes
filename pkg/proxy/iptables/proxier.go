@@ -63,9 +63,10 @@ const (
 	// have it, we have to be extra careful about the exact args we feed in being
 	// the same as the args we read back (iptables itself normalizes some args).
 	// This is the "new" Proxier, so we require "new" versions of tools.
+	// MinCheckVersion=1.4.11,低于此版本不支持  -C / --check flag
 	iptablesMinVersion = utiliptables.MinCheckVersion
 
-	// the services chain
+	// the services chain   Chain类型为string
 	kubeServicesChain utiliptables.Chain = "KUBE-SERVICES"
 
 	// the nodeports chain
@@ -89,6 +90,7 @@ type IPTablesVersioner interface {
 
 // KernelCompatTester tests whether the required kernel capabilities are
 // present to run the iptables proxier.
+// 测试内核是否兼容所需的内核功能来运行iptables代理。
 type KernelCompatTester interface {
 	IsCompatible() error
 }
@@ -98,6 +100,7 @@ type KernelCompatTester interface {
 // the iptables version and for the existence of kernel features. It may return
 // an error if it fails to get the iptables version without error, in which
 // case it will also return false.
+// 根据系统信息查看是否可以使用iptables代理方法（而不是使用namespace代理方法）
 func CanUseIPTablesProxier(iptver IPTablesVersioner, kcompat KernelCompatTester) (bool, error) {
 	minVersion, err := utilversion.ParseGeneric(iptablesMinVersion)
 	if err != nil {
@@ -111,6 +114,7 @@ func CanUseIPTablesProxier(iptver IPTablesVersioner, kcompat KernelCompatTester)
 	if err != nil {
 		return false, err
 	}
+	//查看版本信息是否低于最低版本1.4.11
 	if version.LessThan(minVersion) {
 		return false, nil
 	}
@@ -128,6 +132,7 @@ func (lkct LinuxKernelCompatTester) IsCompatible() error {
 	// Check for the required sysctls.  We don't care about the value, just
 	// that it exists.  If this Proxier is chosen, we'll initialize it as we
 	// need.
+	// 查看/proc/sys/net/ipv4/conf/all/route_localnet值是否存在，不关心值的大小
 	_, err := utilsysctl.New().GetSysctl(sysctlRouteLocalnet)
 	return err
 }
@@ -169,6 +174,7 @@ type endpointsInfo struct {
 // Returns just the IP part of an IP or IP:port or endpoint string. If the IP
 // part is an IPv6 address enclosed in brackets (e.g. "[fd00:1::5]:9999"),
 // then the brackets are stripped as well.
+// 从字符串中获取到ip
 func ipPart(s string) string {
 	if ip := net.ParseIP(s); ip != nil {
 		// IP address without port
@@ -523,6 +529,7 @@ func NewProxier(ipt utiliptables.Interface,
 
 // CleanupLeftovers removes all iptables rules and chains created by the Proxier
 // It returns true if an error was encountered. Errors are logged.
+// 清除所有由proxier创建的的iptables规则
 func CleanupLeftovers(ipt utiliptables.Interface) (encounteredError bool) {
 	// Unlink the services chain.
 	args := []string{
@@ -609,6 +616,7 @@ func CleanupLeftovers(ipt utiliptables.Interface) (encounteredError bool) {
 	return encounteredError
 }
 
+//计算机率
 func computeProbability(n int) string {
 	return fmt.Sprintf("%0.5f", 1.0/float64(n))
 }
@@ -657,6 +665,7 @@ func (proxier *Proxier) isInitialized() bool {
 	return atomic.LoadInt32(&proxier.initialized) > 0
 }
 
+//service添加
 func (proxier *Proxier) OnServiceAdd(service *api.Service) {
 	namespacedName := types.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	if proxier.serviceChanges.update(&namespacedName, nil, service) && proxier.isInitialized() {
@@ -664,6 +673,7 @@ func (proxier *Proxier) OnServiceAdd(service *api.Service) {
 	}
 }
 
+//service更新
 func (proxier *Proxier) OnServiceUpdate(oldService, service *api.Service) {
 	namespacedName := types.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	if proxier.serviceChanges.update(&namespacedName, oldService, service) && proxier.isInitialized() {
@@ -671,6 +681,7 @@ func (proxier *Proxier) OnServiceUpdate(oldService, service *api.Service) {
 	}
 }
 
+//service删除
 func (proxier *Proxier) OnServiceDelete(service *api.Service) {
 	namespacedName := types.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	if proxier.serviceChanges.update(&namespacedName, service, nil) && proxier.isInitialized() {
@@ -678,6 +689,7 @@ func (proxier *Proxier) OnServiceDelete(service *api.Service) {
 	}
 }
 
+//service同步
 func (proxier *Proxier) OnServiceSynced() {
 	proxier.mu.Lock()
 	proxier.servicesSynced = true
@@ -717,6 +729,7 @@ func updateServiceMap(
 	return result
 }
 
+//endpoint添加
 func (proxier *Proxier) OnEndpointsAdd(endpoints *api.Endpoints) {
 	namespacedName := types.NamespacedName{Namespace: endpoints.Namespace, Name: endpoints.Name}
 	if proxier.endpointsChanges.update(&namespacedName, nil, endpoints) && proxier.isInitialized() {
@@ -724,6 +737,7 @@ func (proxier *Proxier) OnEndpointsAdd(endpoints *api.Endpoints) {
 	}
 }
 
+//endpoint更新
 func (proxier *Proxier) OnEndpointsUpdate(oldEndpoints, endpoints *api.Endpoints) {
 	namespacedName := types.NamespacedName{Namespace: endpoints.Namespace, Name: endpoints.Name}
 	if proxier.endpointsChanges.update(&namespacedName, oldEndpoints, endpoints) && proxier.isInitialized() {
@@ -731,6 +745,7 @@ func (proxier *Proxier) OnEndpointsUpdate(oldEndpoints, endpoints *api.Endpoints
 	}
 }
 
+//endpoint删除
 func (proxier *Proxier) OnEndpointsDelete(endpoints *api.Endpoints) {
 	namespacedName := types.NamespacedName{Namespace: endpoints.Namespace, Name: endpoints.Name}
 	if proxier.endpointsChanges.update(&namespacedName, endpoints, nil) && proxier.isInitialized() {
