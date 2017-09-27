@@ -332,16 +332,20 @@ func NewEventCorrelator(clock clock.Clock) *EventCorrelator {
 	return &EventCorrelator{
 		//filterFunc过滤事件
 		filterFunc: DefaultEventFilterFunc,
-		//把相似的事件汇聚在一起
-		//如果在最近 10 分钟出现过 10 个相似的事件
+		// 把相似的事件汇聚在一起
+		// 如果在最近 10 分钟出现过 10 个相似的事件
 		//（除了 message 和时间戳之外其他关键字段都相同的事件），
-		//aggregator 会把它们的 message 设置为
-		//events with common reason combined，这样它们就完全一样了
+		// aggregator 会把它们的 message 设置为
+		// events with common reason combined，这样它们就完全一样了
 		aggregator: NewEventAggregator(
 			cacheSize,
+			// 通过相同的Event域来进行分组
 			EventAggregatorByReasonFunc,
+			// 生成"根据同样的原因进行分组"消息
 			EventAggregatorByReasonMessageFunc,
+			// 每个时间间隔里最多统计10个Events
 			defaultAggregateMaxEvents,
+			// 最大时间间隔为10mins
 			defaultAggregateIntervalInSeconds,
 			clock),
 		//把相同的事件记录到一起
@@ -349,6 +353,7 @@ func NewEventCorrelator(clock clock.Clock) *EventCorrelator {
 		//（除了时间戳之外其他字段都相同）变成同一个事件，
 		//通过增加事件的 Count 字段来记录该事件发生了多少次。
 		//经过 aggregator 的事件会在这里变成同一个事件
+		//在一定事件内多次尝试的事件就会被压缩
 		logger: newEventLogger(cacheSize, clock),
 		//aggregator 和 logger 都会在内部维护一个缓存（默认长度是 4096），
 		//事件的相似性和相同性比较是和缓存中的事件进行的，

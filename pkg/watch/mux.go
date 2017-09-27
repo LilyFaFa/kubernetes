@@ -39,6 +39,7 @@ const incomingQueueLength = 25
 
 // Broadcaster distributes event notifications among any number of watchers. Every event
 // is delivered to every watcher.
+// Broadcaster将消息分发给所有的watcher
 type Broadcaster struct {
 	// TODO: see if this lock is needed now that new watchers go through
 	// the incoming channel.
@@ -64,6 +65,11 @@ type Broadcaster struct {
 // NewBroadcaster creates a new Broadcaster. queueLength is the maximum number of events to queue per watcher.
 // It is guaranteed that events will be distributed in the order in which they occur,
 // but the order in which a single event is distributed among all of the watchers is unspecified.
+// 创建一个broadcaster，包含一些watcher，对于每一个watcher的队列队列长度不超过queueLength
+// 而对于每个watcher，都监视同一个长度为1000的Events Queue，由此保发时队列按Events发生的时间排序。
+// 但是同一个Events发送至Watcher的顺序得不到保证。为了防止短时间内涌入的Events导致来不及处理，
+// 每个EventBroadcaster都拥有一个长度为25的接收缓冲队列。
+// 定义的最后指定了队列满时的相应操作。
 func NewBroadcaster(queueLength int, fullChannelBehavior FullChannelBehavior) *Broadcaster {
 	m := &Broadcaster{
 		watchers:            map[int64]*broadcasterWatcher{},
@@ -71,6 +77,7 @@ func NewBroadcaster(queueLength int, fullChannelBehavior FullChannelBehavior) *B
 		watchQueueLength:    queueLength,
 		fullChannelBehavior: fullChannelBehavior,
 	}
+	//sync.WaitGroup加1
 	m.distributing.Add(1)
 	go m.loop()
 	return m
@@ -105,6 +112,7 @@ func (b *Broadcaster) blockQueue(f func()) {
 // Watch adds a new watcher to the list and returns an Interface for it.
 // Note: new watchers will only receive new events. They won't get an entire history
 // of previous events.
+// 创建一个watcher，只能开始接收信息，不能接收旧信息
 func (m *Broadcaster) Watch() Interface {
 	var w *broadcasterWatcher
 	m.blockQueue(func() {
@@ -195,6 +203,7 @@ func (m *Broadcaster) Shutdown() {
 }
 
 // loop receives from m.incoming and distributes to all watchers.
+// loop从管道中去数据并且发送给所有的watchers
 func (m *Broadcaster) loop() {
 	// Deliberately not catching crashes here. Yes, bring down the process if there's a
 	// bug in watch.Broadcaster.
@@ -214,6 +223,7 @@ func (m *Broadcaster) loop() {
 }
 
 // distribute sends event to all watchers. Blocking.
+// 将事件分发给所有的watcher
 func (m *Broadcaster) distribute(event Event) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -222,6 +232,7 @@ func (m *Broadcaster) distribute(event Event) {
 			select {
 			case w.result <- event:
 			case <-w.stopped:
+			//如果watcher满了则不阻塞，直接将消息扔掉
 			default: // Don't block if the event can't be queued.
 			}
 		}
@@ -231,12 +242,15 @@ func (m *Broadcaster) distribute(event Event) {
 			case w.result <- event:
 			case <-w.stopped:
 			}
+			//如果watcher满了则阻塞
 		}
 	}
 }
 
 // broadcasterWatcher handles a single watcher of a broadcaster
+// broadcaster的watcher
 type broadcasterWatcher struct {
+	//事件
 	result  chan Event
 	stopped chan struct{}
 	stop    sync.Once

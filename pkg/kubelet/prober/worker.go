@@ -32,6 +32,9 @@ import (
 // associated with it which runs the probe loop until the container permanently terminates, or the
 // stop channel is closed. The worker uses the probe Manager's statusManager to get up-to-date
 // container IDs.
+// worker会周期性的在自己需要维护的容器中执行探测程序
+// 每个worker会有一个goroutine
+// 如果pod支持两种探针，那么每个container会有两个worker
 type worker struct {
 	// Channel for stopping the probe.
 	stopCh chan struct{}
@@ -52,6 +55,8 @@ type worker struct {
 	initialValue results.Result
 
 	// Where to store this workers results.
+	// 在创建pod的时候每个容器对应一个worker，用作容器的探针，保存worker的探索结果
+	// 其中包含一个status参数
 	resultsManager results.Manager
 	probeManager   *manager
 
@@ -67,6 +72,7 @@ type worker struct {
 }
 
 // Creates and starts a new probe worker.
+// 创建一个worker，给定探针类型，contaienr所属pod以及探针所属conatienr
 func newWorker(
 	m *manager,
 	probeType probeType,
@@ -96,6 +102,7 @@ func newWorker(
 }
 
 // run periodically probes the container.
+// 容器探针
 func (w *worker) run() {
 	probeTickerPeriod := time.Duration(w.spec.PeriodSeconds) * time.Second
 	probeTicker := time.NewTicker(probeTickerPeriod)
@@ -115,6 +122,7 @@ func (w *worker) run() {
 	time.Sleep(time.Duration(rand.Float64() * float64(probeTickerPeriod)))
 
 probeLoop:
+	//循环性的执行探针程序查看这个方法
 	for w.doProbe() {
 		// Wait for next probe tick.
 		select {
@@ -141,7 +149,7 @@ func (w *worker) doProbe() (keepGoing bool) {
 	defer func() { recover() }() // Actually eat panics (HandleCrash takes care of logging)
 	defer runtime.HandleCrash(func(_ interface{}) { keepGoing = true })
 
-	// pod 没有被创建，或者已经被删除了，直接跳过检测，但是会继续检测
+	// 获取pod的状态
 	status, ok := w.probeManager.statusManager.GetPodStatus(w.pod.UID)
 	if !ok {
 		// Either the pod has not been created yet, or it was already deleted.
@@ -157,6 +165,7 @@ func (w *worker) doProbe() (keepGoing bool) {
 		return false
 	}
 	// 容器没有创建，或者已经删除了，直接返回，并继续检测，等待更多的信息
+	// 查看容器的状态信息
 	c, ok := api.GetContainerStatus(status.ContainerStatuses, w.container.Name)
 	if !ok || len(c.ContainerID) == 0 {
 		// Either the container has not been created yet, or it was deleted.
@@ -164,12 +173,16 @@ func (w *worker) doProbe() (keepGoing bool) {
 			format.Pod(w.pod), w.container.Name)
 		return true // Wait for more information.
 	}
-	// pod 更新了容器，使用最新的容器信息
+	// worker的containerID和pod中的container已经不一致
+	// 说明 pod 更新过容器，使用最新的容器信息
 	if w.containerID.String() != c.ContainerID {
 		if !w.containerID.IsEmpty() {
+			// 从resultsManager移出实效的container
 			w.resultsManager.Remove(w.containerID)
 		}
+		//更新容器的id
 		w.containerID = kubecontainer.ParseContainerID(c.ContainerID)
+		//初始化该容器的resultsManager
 		w.resultsManager.Set(w.containerID, w.initialValue, w.pod)
 		// We've got a new container; resume probing.
 		w.onHold = false
@@ -196,7 +209,7 @@ func (w *worker) doProbe() (keepGoing bool) {
 		return true
 	}
 
-	// 调用 prober 进行检测容器的状态
+	// 调用 prober 进行检测容器的状态，执行探针程序
 	result, err := w.probeManager.prober.probe(w.probeType, w.pod, status, w.container, w.containerID)
 	if err != nil {
 		// Prober error, throw away the result.
@@ -216,7 +229,12 @@ func (w *worker) doProbe() (keepGoing bool) {
 		return true
 	}
 	// 保存最新的检测结果
-
+	// Set将结果写进worker的成员resultsManager的updates中也就是m.updates管道，对于liveness来说，管道的消费者就是kubelet
+	// 也就是syncLoopInteration中的代码
+	// kubelet从管道中得到状态变化就进行处理逻辑
+	// readiness则不同，即使失败也不会重新创建pod
+	// 它使用updateReadiness，定时读取readinessManager管道中的数据,
+	// 并且根据数据调用statusManager更新apiserver中的pod状态信息。
 	w.resultsManager.Set(w.containerID, result, w.pod)
 
 	if w.probeType == liveness && result == results.Failure {

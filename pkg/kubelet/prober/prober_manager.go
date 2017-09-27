@@ -39,11 +39,12 @@ import (
 type Manager interface {
 	// AddPod creates new probe workers for every container probe. This should be called for every
 	// pod created.
-	//在每次创建新 pod 的时候，kubelet 都会调用
+	//在每次创建新 pod 的时候，kubelet 都会调用，从而运行探针程序
 	AddPod(pod *api.Pod)
 
 	// RemovePod handles cleaning up the removed pod state, including terminating probe workers and
 	// deleting cached results.
+	// 删除pod时调用来删除容器的探针
 	RemovePod(pod *api.Pod)
 
 	// CleanupPods handles cleaning up pods which should no longer be running.
@@ -66,6 +67,7 @@ type Manager interface {
 //kubelet 会杀死这个容器，并重启一个新的（除非 RestartPolicy 设置成了 Never）。
 type manager struct {
 	// Map of active workers for probes
+	// 探针worker
 	workers map[probeKey]*worker
 	// Lock for accessing & mutating workers
 	workerLock sync.RWMutex
@@ -74,9 +76,11 @@ type manager struct {
 	statusManager status.Manager
 
 	// readinessManager manages the results of readiness probes
+	// 维护readiness探针结果
 	readinessManager results.Manager
 
 	// livenessManager manages the results of liveness probes
+	// 维护liveness探针结果
 	livenessManager results.Manager
 
 	// prober executes the probe actions.
@@ -102,6 +106,9 @@ func NewManager(
 }
 
 // Start syncing probe status. This should only be called once.
+// 检测就绪探针的返回结果
+// statrt中没有存活探针，因为kubelet可能自己对存活探针进行维护
+// klet.livenessManager = proberesults.NewManager()
 func (m *manager) Start() {
 	// Start syncing readiness.
 	go wait.Forever(m.updateReadiness, 0)
@@ -134,6 +141,10 @@ func (t probeType) String() string {
 	}
 }
 
+// 每次创建新pod的时候，kubelet都会调用这个方法
+// 当创建容器时，最后一步通常都是probeManager.AddPod
+// 该函数会扫描该Pod的所有containers，检查他们是否有readinessProbe或者livenessProbe。
+// 假如有的话，创建一个woker，然后启动一个go routine运行该worker
 func (m *manager) AddPod(pod *api.Pod) {
 	m.workerLock.Lock()
 	defer m.workerLock.Unlock()
@@ -143,7 +154,6 @@ func (m *manager) AddPod(pod *api.Pod) {
 	//并启动一个 goroutine 在后台运行这个 worker。
 	for _, c := range pod.Spec.Containers {
 		key.containerName = c.Name
-
 		if c.ReadinessProbe != nil {
 			key.probeType = readiness
 			if _, ok := m.workers[key]; ok {
@@ -151,6 +161,7 @@ func (m *manager) AddPod(pod *api.Pod) {
 					format.Pod(pod), c.Name)
 				return
 			}
+			//创建worker，将m传了过去，需要将检测结果写进m的channel
 			w := newWorker(m, readiness, pod, c)
 			m.workers[key] = w
 			//运行worker
@@ -167,6 +178,7 @@ func (m *manager) AddPod(pod *api.Pod) {
 			w := newWorker(m, liveness, pod, c)
 			m.workers[key] = w
 			//运行worker
+			//运行容器探针，循环性的给容器发http，tcp或者exec命令，看容器的健康状态
 			go w.run()
 		}
 	}

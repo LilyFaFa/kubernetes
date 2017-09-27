@@ -56,6 +56,7 @@ const (
 type ConfigFactory struct {
 	Client clientset.Interface
 	// queue for pods that need scheduling
+	//pod队列，先进先出，先创建的pod优先被调度
 	PodQueue *cache.FIFO
 	// a means to list all known scheduled pods.
 	ScheduledPodLister *cache.StoreToPodLister
@@ -105,6 +106,7 @@ type ConfigFactory struct {
 }
 
 // Initializes the factory.
+// 初始化一个factory
 func NewConfigFactory(client clientset.Interface, schedulerName string, hardPodAffinitySymmetricWeight int, failureDomains string) *ConfigFactory {
 	stopEverything := make(chan struct{})
 	schedulerCache := schedulercache.New(30*time.Second, stopEverything)
@@ -114,11 +116,14 @@ func NewConfigFactory(client clientset.Interface, schedulerName string, hardPodA
 	pvcInformer := informerFactory.PersistentVolumeClaims()
 
 	c := &ConfigFactory{
-		Client:             client,
+		Client: client,
+		//pod队列，先进先出
 		PodQueue:           cache.NewFIFO(cache.MetaNamespaceKeyFunc),
 		ScheduledPodLister: &cache.StoreToPodLister{},
 		informerFactory:    informerFactory,
 		// Only nodes in the "Ready" condition with status == "True" are schedulable
+		//只有就绪的node可以被调度pod
+		//
 		NodeLister:                     &cache.StoreToNodeLister{},
 		PVLister:                       &cache.StoreToPVFetcher{Store: cache.NewStore(cache.MetaNamespaceKeyFunc)},
 		PVCLister:                      pvcInformer.Lister(),
@@ -454,6 +459,8 @@ func (f *ConfigFactory) getPluginArgs() (*PluginFactoryArgs, error) {
 
 func (f *ConfigFactory) Run() {
 	// Watch and queue pods that need scheduling.
+	// 从apiserver监听pod
+	//创建一个reflector并且运行run函数，监听pod
 	cache.NewReflector(f.createUnassignedNonTerminatedPodLW(), &api.Pod{}, f.PodQueue, 0).RunUntil(f.StopEverything)
 
 	// Begin populating scheduled pods.
@@ -483,6 +490,7 @@ func (f *ConfigFactory) Run() {
 
 func (f *ConfigFactory) getNextPod() *api.Pod {
 	for {
+		//从队列中取出pod
 		pod := cache.Pop(f.PodQueue).(*api.Pod)
 		if f.responsibleForPod(pod) {
 			glog.V(4).Infof("About to try and schedule pod %v", pod.Name)
@@ -644,6 +652,9 @@ type binder struct {
 }
 
 // Bind just does a POST binding RPC.
+//给apiserver发起请求，创建binding对象，
+//不过这里非常需要指出的是，这个请求在apiserver端并没有真正在etcd中创建binding对象，
+//而是为pod指定了node name，并且更新pod到etcd。
 func (b *binder) Bind(binding *api.Binding) error {
 	glog.V(3).Infof("Attempting to bind %v to %v", binding.Name, binding.Target.Name)
 	ctx := api.WithNamespace(api.NewContext(), binding.Namespace)

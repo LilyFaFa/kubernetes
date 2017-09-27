@@ -89,6 +89,7 @@ type genericScheduler struct {
 // Schedule tries to schedule the given pod to one of node in the node list.
 // If it succeeds, it will return the name of the node.
 // If it fails, it will return a Fiterror error with reasons.
+// 默认的schduler
 func (g *genericScheduler) Schedule(pod *api.Pod, nodeLister algorithm.NodeLister) (string, error) {
 	var trace *util.Trace
 	if pod != nil {
@@ -98,6 +99,7 @@ func (g *genericScheduler) Schedule(pod *api.Pod, nodeLister algorithm.NodeListe
 	}
 	defer trace.LogIfLong(100 * time.Millisecond)
 
+	//获取可以被调度的node列表
 	nodes, err := nodeLister.List()
 	if err != nil {
 		return "", err
@@ -114,26 +116,30 @@ func (g *genericScheduler) Schedule(pod *api.Pod, nodeLister algorithm.NodeListe
 
 	// TODO(harryz) Check if equivalenceCache is enabled and call scheduleWithEquivalenceClass here
 
+	//开始预选
+	//看一下预选过程
 	trace.Step("Computing predicates")
 	filteredNodes, failedPredicateMap, err := findNodesThatFit(pod, g.cachedNodeInfoMap, nodes, g.predicates, g.extenders, g.predicateMetaProducer)
 	if err != nil {
 		return "", err
 	}
-
+	//如果没有通过预选的节点，就直接返回说没有节点可以调度这个pod
 	if len(filteredNodes) == 0 {
 		return "", &FitError{
 			Pod:              pod,
 			FailedPredicates: failedPredicateMap,
 		}
 	}
-
+	//开始优选打分
 	trace.Step("Prioritizing")
 	metaPrioritiesInterface := g.priorityMetaProducer(pod, g.cachedNodeInfoMap)
+	//返回优选打分后的列表
+	//看一下这个过程
 	priorityList, err := PrioritizeNodes(pod, g.cachedNodeInfoMap, metaPrioritiesInterface, g.prioritizers, filteredNodes, g.extenders)
 	if err != nil {
 		return "", err
 	}
-
+	//从选出的pod中随机一个pod
 	trace.Step("Selecting host")
 	return g.selectHost(priorityList)
 }
@@ -182,8 +188,12 @@ func findNodesThatFit(
 
 		// We can use the same metadata producer for all nodes.
 		meta := metadataProducer(pod, nodeNameToInfo)
+		// checkNode会调用podFitsOnNode完成配置的所有Predicates Policies对该Node的检查。
 		checkNode := func(i int) {
 			nodeName := nodes[i].Name
+			//对该pod运行所有的默认筛选函数
+			//不符合的原因在failedPredicates
+			//fits是true的时候说明该节点都可以调度这个pod
 			fits, failedPredicates, err := podFitsOnNode(pod, meta, nodeNameToInfo[nodeName], predicateFuncs)
 			if err != nil {
 				predicateResultLock.Lock()
@@ -191,6 +201,7 @@ func findNodesThatFit(
 				predicateResultLock.Unlock()
 				return
 			}
+			//如果经过了所有的筛选函数，那么该节点可以被调度
 			if fits {
 				filtered[atomic.AddInt32(&filteredLen, 1)-1] = nodes[i]
 			} else {
@@ -199,13 +210,15 @@ func findNodesThatFit(
 				predicateResultLock.Unlock()
 			}
 		}
+		// 根据nodes数量，启动最多16个goroutine worker执行checkNode方法
 		workqueue.Parallelize(16, len(nodes), checkNode)
 		filtered = filtered[:filteredLen]
 		if len(errs) > 0 {
 			return []*api.Node{}, FailedPredicateMap{}, errors.NewAggregate(errs)
 		}
 	}
-
+	// 如果配置了Extender，就是有自己的配置的算法
+	// 则执行Extender的Filter逻辑继续甩选。
 	if len(filtered) > 0 && len(extenders) != 0 {
 		for _, extender := range extenders {
 			filteredList, failedMap, err := extender.Filter(pod, filtered)
@@ -225,12 +238,17 @@ func findNodesThatFit(
 			}
 		}
 	}
+	//返回符合筛选条件的node以及不符合筛选条件的node被淘汰的原因
 	return filtered, failedPredicateMap, nil
 }
 
 // Checks whether node with a given name and NodeInfo satisfies all predicateFuncs.
+// 循环执行所有配置的Predicates Polic对应的predicateFunc。
 func podFitsOnNode(pod *api.Pod, meta interface{}, info *schedulercache.NodeInfo, predicateFuncs map[string]algorithm.FitPredicate) (bool, []algorithm.PredicateFailureReason, error) {
 	var failedPredicates []algorithm.PredicateFailureReason
+	//for循环遍历predicate函数
+	//使用predict作为过滤器，逐一进行筛选，一气呵成，
+	//这里将算法传递给数据的思想，将Golang的思维展示得淋漓尽致！
 	for _, predicate := range predicateFuncs {
 		fit, reasons, err := predicate(pod, meta, info)
 		if err != nil {
@@ -250,6 +268,8 @@ func podFitsOnNode(pod *api.Pod, meta interface{}, info *schedulercache.NodeInfo
 // Each priority function can also have its own weight
 // The node scores returned by the priority function are multiplied by the weights to get weighted scores
 // All scores are finally combined (added) to get the total weighted scores of all nodes
+// 根据所有配置到Priorities Policies对所有预选后的Nodes进行优选打分
+// 每个Priorities policy对每个node打分范围为0-10分，分越高表示越合适
 func PrioritizeNodes(
 	pod *api.Pod,
 	nodeNameToInfo map[string]*schedulercache.NodeInfo,
@@ -303,6 +323,7 @@ func PrioritizeNodes(
 			results[i] = make(schedulerapi.HostPriorityList, len(nodes))
 		}
 	}
+	// 对单个node遍历所有的Priorities Policies，得到每个node每个policy打分的二维数据数据
 	processNode := func(index int) {
 		nodeInfo := nodeNameToInfo[nodes[index].Name]
 		var err error
@@ -317,7 +338,10 @@ func PrioritizeNodes(
 			}
 		}
 	}
+	// 根据nodes数量，启动最多16个goroutine worker执行processNode方法
 	workqueue.Parallelize(16, len(nodes), processNode)
+	// 遍历所有配置的Priorities policies，
+	// 如果某个policy配置了Reduce，则执行对应的Reduce，更新result[node][policy]得分
 	for i, priorityConfig := range priorityConfigs {
 		if priorityConfig.Reduce == nil {
 			continue
@@ -337,6 +361,7 @@ func PrioritizeNodes(
 	}
 
 	// Summarize all scores.
+	// 对得分进行加权求和得到最终分数
 	result := make(schedulerapi.HostPriorityList, 0, len(nodes))
 	// TODO: Consider parallelizing it.
 	for i := range nodes {
@@ -346,6 +371,7 @@ func PrioritizeNodes(
 		}
 	}
 
+	// 如果配置了Extender，则再执行Extender的优选打分方法Extender.Prioritize
 	if len(extenders) != 0 && nodes != nil {
 		combinedScores := make(map[string]int, len(nodeNameToInfo))
 		for _, extender := range extenders {

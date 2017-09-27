@@ -74,6 +74,7 @@ type Config struct {
 }
 
 // New returns a new scheduler.
+// 创建一个Scheduler
 func New(c *Config) *Scheduler {
 	s := &Scheduler{
 		config: c,
@@ -83,15 +84,22 @@ func New(c *Config) *Scheduler {
 }
 
 // Run begins watching and scheduling. It starts a goroutine and returns immediately.
+// 运行scheduler的Run函数，启动schduler
 func (s *Scheduler) Run() {
+	//启动goroutine，循环执行scheduleOne，调度逻辑
 	go wait.Until(s.scheduleOne, 0, s.config.StopEverything)
 }
 
+// 核心函数，Run函数调度运行的函数
 func (s *Scheduler) scheduleOne() {
+	// 获取需要需要调度的pod
+	// 从PodQueue中获取一个需要调度的pod
 	pod := s.config.NextPod()
 
 	glog.V(3).Infof("Attempting to schedule pod: %v/%v", pod.Namespace, pod.Name)
 	start := time.Now()
+	// 根据调度算法，计算出该pod需要调度到的节点node
+	// 看一下调度函数
 	dest, err := s.config.Algorithm.Schedule(pod, s.config.NodeLister)
 	if err != nil {
 		glog.V(1).Infof("Failed to schedule pod: %v/%v", pod.Namespace, pod.Name)
@@ -125,7 +133,8 @@ func (s *Scheduler) scheduleOne() {
 
 	go func() {
 		defer metrics.E2eSchedulingLatency.Observe(metrics.SinceInMicroseconds(start))
-
+		//调度的predict和priorities执行完之后，会得到最终的node。
+		//接下来就是将node和pod绑定的过程了。下面创建了binding对象，这个对象的创建如下：
 		b := &api.Binding{
 			ObjectMeta: api.ObjectMeta{Namespace: pod.Namespace, Name: pod.Name},
 			Target: api.ObjectReference{
@@ -137,6 +146,10 @@ func (s *Scheduler) scheduleOne() {
 		bindingStart := time.Now()
 		// If binding succeeded then PodScheduled condition will be updated in apiserver so that
 		// it's atomic with setting host.
+		//我们可以看到，binding包含了node和pod，
+		//一旦绑定，kubelet认为pod找到了合适的Node，
+		//然后node上的kubelet会拉起pod。
+		//看一下Bind方法的实现
 		err := s.config.Binder.Bind(b)
 		if err != nil {
 			glog.V(1).Infof("Failed to bind pod: %v/%v", pod.Namespace, pod.Name)
@@ -153,6 +166,7 @@ func (s *Scheduler) scheduleOne() {
 			return
 		}
 		metrics.BindingLatency.Observe(metrics.SinceInMicroseconds(bindingStart))
+		//写入事件机制中
 		s.config.Recorder.Eventf(pod, api.EventTypeNormal, "Scheduled", "Successfully assigned %v to %v", pod.Name, dest)
 	}()
 }

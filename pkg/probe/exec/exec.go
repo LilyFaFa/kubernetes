@@ -34,6 +34,7 @@ type ExecProber interface {
 type execProber struct{}
 
 func (pr execProber) Probe(e exec.Cmd) (probe.Result, string, error) {
+	//运行命令，如果没有错，那么err为nil，那么探测成功
 	data, err := e.CombinedOutput()
 	glog.V(4).Infof("Exec probe response: %q", string(data))
 	if err != nil {

@@ -2114,6 +2114,7 @@ func (dm *DockerManager) SyncPod(pod *api.Pod, _ api.PodStatus, podStatus *kubec
 	//不管是创建、更新还是删除 pod，最终都会调用 syncPod 方法，
 	//所以这个结果涵盖了所有的可能性。
 	//看一下这个函数
+	//infrastructure的变化信息、init container的变化信息，应用container的变化消息
 	containerChanges, err := dm.computePodContainerChanges(pod, podStatus)
 	if err != nil {
 		result.Fail(err)

@@ -336,11 +336,16 @@ type KubeletConfiguration struct {
 	// lockFilePath is the path that kubelet will use to as a lock file.
 	// It uses this file as a lock to synchronize with other kubelet processes
 	// that may be running.
+	// kubelet用作锁文件，用于和其他的kubelet进程建立同步关系
 	LockFilePath string `json:"lockFilePath"`
 	// ExitOnLockContention is a flag that signifies to the kubelet that it is running
 	// in "bootstrap" mode. This requires that 'LockFilePath' has been set.
 	// This will cause the kubelet to listen to inotify events on the lock file,
 	// releasing it and exiting when another process tries to open that file.
+	// ExitOnLockContention是一个标志，表示kubelet它以“引导“模式运行。
+	// 这需要“LockFilePath”已设置。
+	// 这将导致kubelet在锁文件上收听inotify事件，
+	// 当另一个进程尝试打开该文件时释放它并退出。
 	ExitOnLockContention bool `json:"exitOnLockContention"`
 	// How should the kubelet configure the container bridge for hairpin packets.
 	// Setting this flag allows endpoints in a Service to loadbalance back to

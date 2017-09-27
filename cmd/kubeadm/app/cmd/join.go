@@ -135,21 +135,23 @@ func NewJoin(cfgPath string, args []string, cfg *kubeadmapi.NodeConfiguration, s
 
 // Run executes worked node provisioning and tries to join an existing cluster.
 func (j *Join) Run(out io.Writer) error {
+	// 访问kube-discovery服务，获取cluster相关信息
 	clusterInfo, err := kubenode.RetrieveTrustedClusterInfo(j.cfg)
 	if err != nil {
 		return err
 	}
-
+	// 使用用户指定的token检验cluster info对象的签名，如果检验失败则自然不允许加入该k8s集群
 	connectionDetails, err := kubenode.EstablishMasterConnection(j.cfg, clusterInfo)
 	if err != nil {
 		return err
 	}
-
+	// 通过ConnectionDetails对象与apiserver建立连接，并向apiserver请求为该节点创建证书，
+	// 然后根据该证书创建kubeconfig对象
 	kubeconfig, err := kubenode.PerformTLSBootstrap(connectionDetails)
 	if err != nil {
 		return err
 	}
-
+	// 将kubeconfig对象写入“/etc/kubernetes/kubelet.config”文件
 	err = kubeadmutil.WriteKubeconfigIfNotExists("kubelet", kubeconfig)
 	if err != nil {
 		return err
@@ -158,3 +160,12 @@ func (j *Join) Run(out io.Writer) error {
 	fmt.Fprintf(out, joinDoneMsgf)
 	return nil
 }
+
+//节点上的kubelet需要通过kubelet.conf与apiserver进行安全通信。
+
+//从上面的分析可以看出：kubeadm join主要负责创建kubelet.conf文件，创建的流程如下：
+//访问kube-discovery服务获取k8s cluster info，
+//主要包含如下信息：cluster ca证书、endpoint列表和token
+//利用用户指定的token，检验k8s cluster info的签名，建议通过才能进行后续步骤
+//与endpoint列表的其中一个apiserver建立连接，
+//请求apiserver为该node节点创建证书，然后利用该获取到的证书创建kubelet.conf

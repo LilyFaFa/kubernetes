@@ -48,21 +48,26 @@ type versionedPodStatus struct {
 }
 
 type podStatusSyncRequest struct {
+	//唯一性的字符串标示
 	podUID types.UID
 	status versionedPodStatus
 }
 
 // Updates pod statuses in apiserver. Writes only when new status has changed.
 // All methods are thread-safe.
+// 向apiserver更新pod的状态信息
 type manager struct {
 	kubeClient clientset.Interface
 	podManager kubepod.Manager
 	// Map from pod UID to sync status of the corresponding pod.
-	podStatuses      map[types.UID]versionedPodStatus
-	podStatusesLock  sync.RWMutex
+	// 维护podUID与对应的pod的状态
+	podStatuses     map[types.UID]versionedPodStatus
+	podStatusesLock sync.RWMutex
+	//channel用来存储pod变化信息
 	podStatusChannel chan podStatusSyncRequest
 	// Map from (mirror) pod UID to latest status version successfully sent to the API server.
 	// apiStatusVersions must only be accessed from the sync thread.
+	// 记录，key是pod的UID，value是最后最近一次发送给apiserver的值，
 	apiStatusVersions map[types.UID]uint64
 }
 
@@ -81,18 +86,19 @@ type Manager interface {
 	PodStatusProvider
 
 	// Start the API server status sync loop.
-	//kubelet 运行的时候调用的，它会启动一个 goroutine 执行更新操作
+	// kubelet 运行的时候调用的，它会启动一个 goroutine 执行更新操作
 	Start()
 
 	// SetPodStatus caches updates the cached status for the given pod, and triggers a status update.
-	// 如果 pod 的状态发生了变化，会调用这个方法，把新状态更新到 apiserver，
+	// 如果 pod 的状态发生了变化，会调用这个方法，将新状态写进channel（podStatusChannel），
+	// start会处理这个channel中的新状态,将新状态更新给apiserver
 	// 一般在 kubelet 维护 pod 生命周期的时候会调用
+	// 这些方法内部SetPodStatus会往这个 channel 写数据。
 	SetPodStatus(pod *api.Pod, status api.PodStatus)
 
 	// SetContainerReadiness updates the cached container status with the given readiness, and
 	// triggers a status update.
-	// 如果健康检查发现 pod 中容器的健康状态发生变化，
-	// 会调用这个方法，修改 pod 的健康状态
+	// 就绪探针检查结果set
 	SetContainerReadiness(podUID types.UID, containerID kubecontainer.ContainerID, ready bool)
 
 	// TerminatePod resets the container status for the provided pod to terminated and triggers
@@ -144,10 +150,13 @@ func (m *manager) Start() {
 		select {
 		//podStatusChannel 是所有 pod 状态更新发送到的地方，
 		//调用方不会直接操作这个 channel，而是通过调用上面提到的修改状态的各种方法，
-		//这些方法内部会往这个 channel 写数据。
+		//这些方法内部SetPodStatus会往这个 channel 写数据。
 		case syncRequest := <-m.podStatusChannel:
-			//根据参数中的 pod 和它的状态信息对 apiserver 中的数据进行更新，
-			//如果发现 pod 已经被删除也会把它从内部数据结构中删除。
+			// 根据参数中的 pod 和它的状态信息对 apiserver 中的数据进行更新，
+			// 如果发现 pod 已经被删除也会把它从内部数据结构中删除。
+			// 从podStatusChannel读取信息，然后更新Pod。
+			// 由于statusManager有一个podStatues map[types.UID]versionedPodStatus的成员变量，
+			// 本身缓存了pod的status信息，因此会定期syncBatch。
 			m.syncPod(syncRequest.podUID, syncRequest.status)
 		//syncTicker 是个定时器，
 		//也就是说它会定时保证 apiserver 和自己缓存的最新 pod 状态保持一致
@@ -178,6 +187,7 @@ func (m *manager) SetPodStatus(pod *api.Pod, status api.PodStatus) {
 	m.updateStatusInternal(pod, status, pod.DeletionTimestamp != nil)
 }
 
+// proberManager将就绪探针探测结果写过来
 func (m *manager) SetContainerReadiness(podUID types.UID, containerID kubecontainer.ContainerID, ready bool) {
 	m.podStatusesLock.Lock()
 	defer m.podStatusesLock.Unlock()
@@ -340,6 +350,7 @@ func (m *manager) updateStatusInternal(pod *api.Pod, status api.PodStatus, force
 	m.podStatuses[pod.UID] = newStatus
 
 	select {
+	//将状态写进channel，等待处理
 	case m.podStatusChannel <- podStatusSyncRequest{pod.UID, newStatus}:
 		return true
 	default:
@@ -416,12 +427,15 @@ func (m *manager) syncBatch() {
 
 // syncPod syncs the given status with the API server. The caller must not hold the lock.
 func (m *manager) syncPod(uid types.UID, status versionedPodStatus) {
+	// 查看上次发送给apiserver的值也就是最近一次更新给apiserver的值是不是和最新的状态一样，
+	// 一样就不更新apiserver的pod状态
 	if !m.needsUpdate(uid, status) {
 		glog.V(1).Infof("Status for pod %q is up-to-date; skipping", uid)
 		return
 	}
 
 	// TODO: make me easier to express from client code
+	// 从apiserver获取当前pod的信息，根据pod的name进行查询
 	pod, err := m.kubeClient.Core().Pods(status.podNamespace).Get(status.podName)
 	if errors.IsNotFound(err) {
 		glog.V(3).Infof("Pod %q (%s) does not exist on the server", status.podName, uid)
@@ -430,25 +444,48 @@ func (m *manager) syncPod(uid types.UID, status versionedPodStatus) {
 		return
 	}
 	if err == nil {
+		// 从apiserver得到的pod的UID与自己的不一样，说明这个pod已经被重建过了，
+		// apiserver已经没有这个pod了。
+		// 旧pod已经被删除也会把它从内部数据结构中删除，
+		// 不再对它进行状态的维护
 		translatedUID := m.podManager.TranslatePodUID(pod.UID)
 		if len(translatedUID) > 0 && translatedUID != uid {
 			glog.V(2).Infof("Pod %q was deleted and then recreated, skipping status update; old UID %q, new UID %q", format.Pod(pod), uid, translatedUID)
 			m.deletePodStatus(uid)
 			return
 		}
+		// 更新pod的status
 		pod.Status = status.status
 		// TODO: handle conflict as a retry, make that easier too.
+		// 更新apiserver的pod的状态，通过发送apiserver的update请求
+		// apiserver相应后返回response
 		pod, err = m.kubeClient.Core().Pods(pod.Namespace).UpdateStatus(pod)
+		// 发送了请求之后看apiserver的反馈信息来处理状态变化。
 		if err == nil {
 			glog.V(3).Infof("Status for pod %q updated successfully: %+v", format.Pod(pod), status)
+			//本地维护最后一次发送给apiserver的状态
 			m.apiStatusVersions[pod.UID] = status.version
 			if kubepod.IsMirrorPod(pod) {
 				// We don't handle graceful deletion of mirror pods.
 				return
 			}
+			// 资源被删除的事件期限
+			// 用户请求删除资源时，服务器端生成该字段，生成以后client端不能直接修改。
+			// 到该字段指定的时间以后，资源会被删除，删除以后 资源列表中将看不到该资源，
+			// 也无法通过名字检索该资源。
+			// 该字段一旦设置，该字段只能被修改为已指定时间之前的某个时间，
+			// 也可以在已指定时间之前删除该资源，而不能取消或者修改为已指定时间之后的时间。
+			// 举个例子，一个用户请求在30s内删除一个pod，
+			// 对应的kubelet会向pod内的所有容器发送一个优雅的termination信号，
+			// 一旦pod资源被删除，kubelet会发送强制的termination信号。
+			// 如果为空，说明apiserver没有反馈删除pod的信息，直接返回
 			if pod.DeletionTimestamp == nil {
 				return
 			}
+			// 也就是如果apiserver的返回的是准备删除状态信号，设置了DeletionTimestamp
+			// kubelet相应在本机删除这个pod
+			// 首先查看它的contaienr的状态
+			// 如果coantianer还在运行，则写日志记录一个错误
 			if !notRunning(pod.Status.ContainerStatuses) {
 				glog.V(3).Infof("Pod %q is terminated, but some containers are still running", format.Pod(pod))
 				return
@@ -457,8 +494,10 @@ func (m *manager) syncPod(uid types.UID, status versionedPodStatus) {
 			// Use the pod UID as the precondition for deletion to prevent deleting a newly created pod with the same name and namespace.
 			deleteOptions.Preconditions = api.NewUIDPreconditions(string(pod.UID))
 			glog.V(2).Infof("Removing Pod %q from etcd", format.Pod(pod))
+			// 向apiserver发送请求pod已经被删除的信号，更新apiserver的pod状态为deleted
 			if err = m.kubeClient.Core().Pods(pod.Namespace).Delete(pod.Name, deleteOptions); err == nil {
 				glog.V(3).Infof("Pod %q fully terminated and removed from etcd", format.Pod(pod))
+				//放弃维护这个pod的状态信息
 				m.deletePodStatus(uid)
 				return
 			}
@@ -471,6 +510,8 @@ func (m *manager) syncPod(uid types.UID, status versionedPodStatus) {
 
 // needsUpdate returns whether the status is stale for the given pod UID.
 // This method is not thread safe, and most only be accessed by the sync thread.
+// 如果pod的状态和上次发送给apiserver的状态一样，也就是期间pod的状态没变化，那么就不会
+// 向apiserver发送pod状态更新的请求
 func (m *manager) needsUpdate(uid types.UID, status versionedPodStatus) bool {
 	latest, ok := m.apiStatusVersions[uid]
 	return !ok || latest < status.version

@@ -96,6 +96,10 @@ type Manager interface {
 //
 // All fields in basicManager are read-only and are updated calling SetPods,
 // AddPod, UpdatePod, or DeletePod.
+// 维护pod的信息，例如通过uid与pod对应，podname和pod对象对应
+// 这个stuct是只读的，但是可以通过SetPods，AddPod, UpdatePod, or DeletePod来更新。
+// 小写，不能直接被访问
+// 加锁，互斥访问
 type basicManager struct {
 	// Protects all internal maps.
 	lock sync.RWMutex

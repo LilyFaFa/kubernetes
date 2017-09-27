@@ -80,10 +80,11 @@ func NewKubeletServer() *KubeletServer {
 }
 
 // AddFlags adds flags for a specific KubeletServer to the specified FlagSet
-//它的唯一作用就是把命令行参数和它的字段一一对应起来。这样解析命令行参数的时候，就更新对应的字段。
-//这里是所有命令行参数定义的地方，如果要查询某个版本提供了哪些命令行，我会阅读这部分内容。
+// 它的唯一作用就是把命令行参数和它的字段一一对应起来。这样解析命令行参数的时候，就更新对应的字段。
+// 这里是所有命令行参数定义的地方，如果要查询某个版本提供了哪些命令行会阅读这部分内容。
 func (s *KubeletServer) AddFlags(fs *pflag.FlagSet) {
 	// TODO(#34726:1.8.0): Remove the opt-in for failing when swap is enabled.
+	// BoolVar(p *bool, name string, value bool, usage string)
 	fs.BoolVar(&s.ExperimentalFailSwapOn, "experimental-fail-swap-on", s.ExperimentalFailSwapOn, "Makes the Kubelet fail to start if swap is enabled on the node. This is a temporary opton to maintain legacy behavior, failing due to swap enabled will happen by default in v1.6.")
 
 	fs.Var(&s.KubeConfig, "kubeconfig", "Path to a kubeconfig file, specifying how to connect to the API server. --api-servers will be used for the location unless --require-kubeconfig is set.")

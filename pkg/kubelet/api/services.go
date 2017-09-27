@@ -74,9 +74,12 @@ type PodSandboxManager interface {
 
 // RuntimeService interface should be implemented by a container runtime.
 // The methods should be thread-safe.
+// CRI的 protocol buffers API包含了两个gRPC服务：ImageService和RuntimeService。
+// RuntimeSerivce包含了Pods和容器生命周期管理的RPC，以及跟容器交互的调用(exec/attach/port-forward)。
 type RuntimeService interface {
 	RuntimeVersioner
 	ContainerManager
+	//Pod在CRI环境中称为PodSandbox
 	PodSandboxManager
 
 	// UpdateRuntimeConfig updates runtime configuration if specified
@@ -88,6 +91,7 @@ type RuntimeService interface {
 // ImageManagerService interface should be implemented by a container image
 // manager.
 // The methods should be thread-safe.
+// ImageService提供了从镜像仓库拉取、查看、和移除镜像的RPC。
 type ImageManagerService interface {
 	// ListImages lists the existing images.
 	ListImages(filter *runtimeApi.ImageFilter) ([]*runtimeApi.Image, error)

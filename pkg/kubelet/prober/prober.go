@@ -45,18 +45,26 @@ import (
 const maxProbeRetries = 3
 
 // Prober helps to check the liveness/readiness of a container.
+// 探针，对容器进行定期诊断，执行诊断时调用容器实现的handler，有三种探测方式
+// 两种探针，存活探针和就绪探针
 type prober struct {
-	exec   execprobe.ExecProber
-	http   httprobe.HTTPProber
+	//在容器内执行指定命令。如果命令退出时返回码为 0 则认为诊断成功。
+	exec execprobe.ExecProber
+	//对指定的端口和路径上的容器的 IP 地址执行 HTTP Get 请求。
+	//如果响应的状态码大于等于200 且小于 400，则诊断被认为是成功的。
+	http httprobe.HTTPProber
+	//对指定端口上的容器的 IP 地址进行 TCP 检查。如果端口打开，则诊断被认为是成功的。
 	tcp    tcprobe.TCPProber
 	runner kubecontainer.ContainerCommandRunner
 
 	refManager *kubecontainer.RefManager
-	recorder   record.EventRecorder
+	//用于写事件，具体看kubelet的事件机制
+	recorder record.EventRecorder
 }
 
 // NewProber creates a Prober, it takes a command runner and
 // several container info managers.
+// 创建探针
 func newProber(
 	runner kubecontainer.ContainerCommandRunner,
 	refManager *kubecontainer.RefManager,
@@ -73,6 +81,7 @@ func newProber(
 }
 
 // probe probes the container.
+// 探测容器
 func (pb *prober) probe(probeType probeType, pod *api.Pod, status api.PodStatus, container api.Container, containerID kubecontainer.ContainerID) (results.Result, error) {
 	var probeSpec *api.Probe
 	switch probeType {
@@ -90,6 +99,7 @@ func (pb *prober) probe(probeType probeType, pod *api.Pod, status api.PodStatus,
 		return results.Success, nil
 	}
 
+	// 运行指定次数探测程序探测容器状况
 	result, output, err := pb.runProbeWithRetries(probeSpec, pod, status, container, containerID, maxProbeRetries)
 	if err != nil || result != probe.Success {
 		// Probe failed in one way or another.
@@ -140,6 +150,10 @@ func buildHeader(headerList []api.HTTPHeader) http.Header {
 	return headers
 }
 
+//运行探测程序，观测容器的健康状况
+//探测方式有在容器中运行命令，
+//发送http请求
+//或者tcp请求
 func (pb *prober) runProbe(p *api.Probe, pod *api.Pod, status api.PodStatus, container api.Container, containerID kubecontainer.ContainerID) (probe.Result, string, error) {
 	timeout := time.Duration(p.TimeoutSeconds) * time.Second
 	if p.Exec != nil {
@@ -227,6 +241,7 @@ type execInContainer struct {
 	run func() ([]byte, error)
 }
 
+//在容器里面运行程序
 func (pb *prober) newExecInContainer(container api.Container, containerID kubecontainer.ContainerID, cmd []string, timeout time.Duration) exec.Cmd {
 	return execInContainer{func() ([]byte, error) {
 		return pb.runner.RunInContainer(containerID, cmd, timeout)

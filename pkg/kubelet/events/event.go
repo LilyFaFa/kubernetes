@@ -16,8 +16,10 @@ limitations under the License.
 
 package events
 
+//定义了kubelet的事件类型
 const (
 	// Container event reason list
+	//与容器相关的事件
 	CreatedContainer        = "Created"
 	StartedContainer        = "Started"
 	FailedToCreateContainer = "Failed"
@@ -27,6 +29,7 @@ const (
 	ExceededGracePeriod     = "ExceededGracePeriod"
 
 	// Image event reason list
+	// 与镜像相关的事件
 	PullingImage            = "Pulling"
 	PulledImage             = "Pulled"
 	FailedToPullImage       = "Failed"

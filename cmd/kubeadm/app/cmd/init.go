@@ -64,6 +64,7 @@ var (
 func NewCmdInit(out io.Writer) *cobra.Command {
 	versioned := &kubeadmapiext.MasterConfiguration{}
 	api.Scheme.Default(versioned)
+	//创建配置信息
 	cfg := kubeadmapi.MasterConfiguration{}
 	api.Scheme.Convert(versioned, &cfg, nil)
 
@@ -73,6 +74,7 @@ func NewCmdInit(out io.Writer) *cobra.Command {
 		Use:   "init",
 		Short: "Run this in order to set up the Kubernetes master",
 		Run: func(cmd *cobra.Command, args []string) {
+			//初始化配置信息
 			i, err := NewInit(cfgPath, &cfg, skipPreFlight)
 			kubeadmutil.CheckErr(err)
 			kubeadmutil.CheckErr(i.Run(out))
@@ -163,6 +165,7 @@ type Init struct {
 }
 
 func NewInit(cfgPath string, cfg *kubeadmapi.MasterConfiguration, skipPreFlight bool) (*Init, error) {
+	//读配置文件
 	if cfgPath != "" {
 		b, err := ioutil.ReadFile(cfgPath)
 		if err != nil {
@@ -185,6 +188,8 @@ func NewInit(cfgPath string, cfg *kubeadmapi.MasterConfiguration, skipPreFlight 
 
 	if !skipPreFlight {
 		fmt.Println("Running pre-flight checks")
+		//进行主节点的运行环境检测
+		//看一下测试的组成
 		err := preflight.RunInitMasterChecks(cfg)
 		if err != nil {
 			return nil, &preflight.PreFlightError{Msg: err.Error()}
@@ -212,20 +217,24 @@ type joinArgsData struct {
 }
 
 // Run executes master node provisioning, including certificates, needed static pod manifests, etc.
+//初始化之后看一下run函数
 func (i *Init) Run(out io.Writer) error {
+	//创建认证文件
 	if err := kubemaster.CreateTokenAuthFile(&i.cfg.Secrets); err != nil {
 		return err
 	}
-
+	//需要安装的主节点各个pod的基本配置的生成（apiserver，controllerManager，scheduler）
+	//根据配置信息生成各个组件的配置文件
+	//生成Manifests，在/etc/kubernetes/manifests
 	if err := kubemaster.WriteStaticPodManifests(i.cfg); err != nil {
 		return err
 	}
-
+	//生成证书，证书都放在/etc/kubernetes/pki下面
 	caKey, caCert, err := kubemaster.CreatePKIAssets(i.cfg)
 	if err != nil {
 		return err
 	}
-
+	//生成kubeconfig配置文件，/etc/kubernetes
 	kubeconfigs, err := kubemaster.CreateCertsAndConfigForClients(i.cfg.API, []string{"kubelet", "admin"}, caKey, caCert)
 	if err != nil {
 		return err
@@ -252,14 +261,17 @@ func (i *Init) Run(out io.Writer) error {
 	}
 
 	schedulePodsOnMaster := false
+	//是否允许将pod调度到master节点上
 	if err := kubemaster.UpdateMasterRoleLabelsAndTaints(client, schedulePodsOnMaster); err != nil {
 		return err
 	}
-
+	//启动插件kube-discovery
+	// 当需要往k8s集群添加node时，“kubeadm join”首先通过URL向kube-discovery server请求cluster的相关信息
+	// kube-discovery服务收到请求之后，将cluster ca证书，endpoint列表和token以k8s secrets的方式回复给发送请求的节点
 	if err := kubemaster.CreateDiscoveryDeploymentAndSecret(i.cfg, client, caCert); err != nil {
 		return err
 	}
-
+	//启动一些addons插件kube-dns，kube-proxy
 	if err := kubemaster.CreateEssentialAddons(i.cfg, client); err != nil {
 		return err
 	}
@@ -273,7 +285,14 @@ func (i *Init) Run(out io.Writer) error {
 	return nil
 }
 
+//kubeadm init主要负责创建k8s集群的key、certs和conf文件，
+//创建etcd、kube-apiserver、kube-controller-manager、kube-scheduler这些static pod的
+//json格式的manifest文件（
+//kubelet会监视“/etc/kubernetes/manifests”目录下的manifest文件，一旦发现则启动对应的static pod），
+//所有没有创建这几个pod的过程
+//然后启动kube-discovery deployment、kube-proxy daemonSet、kube-dns deployment这三个addon。
 // generateJoinArgs generates kubeadm join arguments
+
 func generateJoinArgs(data joinArgsData) (string, error) {
 	joinArgsTemplate := template.Must(template.New("joinArgsTemplate").Parse(joinArgsTemplateLiteral))
 	var b bytes.Buffer

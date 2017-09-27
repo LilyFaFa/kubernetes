@@ -49,6 +49,7 @@ type Mux struct {
 }
 
 // NewMux creates a new mux that can merge changes from multiple sources.
+// 整合各路资源
 func NewMux(merger Merger) *Mux {
 	mux := &Mux{
 		sources: make(map[string]chan interface{}),
@@ -62,6 +63,7 @@ func NewMux(merger Merger) *Mux {
 // source will return the same channel. This allows change and state based sources
 // to use the same channel. Different source names however will be treated as a
 // union.
+//
 func (m *Mux) Channel(source string) chan interface{} {
 	if len(source) == 0 {
 		panic("Channel given an empty name")
@@ -80,6 +82,7 @@ func (m *Mux) Channel(source string) chan interface{} {
 
 func (m *Mux) listen(source string, listenChannel <-chan interface{}) {
 	for update := range listenChannel {
+		//调用Merge
 		m.merger.Merge(source, update)
 	}
 }

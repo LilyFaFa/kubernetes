@@ -97,6 +97,8 @@ func Run(s *options.SchedulerServer) error {
 	}
 
 	go func() {
+		//启动http服务，方便通过/debug/pprof接口进行性能数据收集调优；
+		//metrics接口用于供prometheus收集监控数据
 		mux := http.NewServeMux()
 		healthz.InstallHandler(mux)
 		if s.EnableProfiling {
@@ -121,14 +123,18 @@ func Run(s *options.SchedulerServer) error {
 		glog.Fatalf("Failed to create scheduler configuration: %v", err)
 	}
 
+	//创建一个事件广播
 	eventBroadcaster := record.NewBroadcaster()
+	//创建一个Recorder，可以用于写入event
 	config.Recorder = eventBroadcaster.NewRecorder(api.EventSource{Component: s.SchedulerName})
+	//创建两个watcher
 	eventBroadcaster.StartLogging(glog.Infof)
 	eventBroadcaster.StartRecordingToSink(&unversionedcore.EventSinkImpl{Interface: leaderElectionClient.Core().Events("")})
-
+	//创建一个sheduler
 	sched := scheduler.New(config)
 
 	run := func(_ <-chan struct{}) {
+		//运行scheduler，重点
 		sched.Run()
 		select {}
 	}

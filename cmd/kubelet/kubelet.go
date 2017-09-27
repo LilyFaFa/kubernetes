@@ -37,7 +37,12 @@ import (
 
 func main() {
 	//创建一个kubeletServer，kubeletServer对kubelet运行的所有参数进行了封装。
+	//并不是真正运行的kubelet的实例
 	s := options.NewKubeletServer()
+	// 初始化创建一个FlagSet，包含很多kubeletServer的参数，初始化参数的用途，设置一个默认值。
+	// 使用的是flag库，不进行分析
+	// Addflag唯一作用就是把命令行参数和它的字段一一对应起来。
+	// 这样解析命令行参数的时候，就更新对应的字段。
 	s.AddFlags(pflag.CommandLine)
 
 	flag.InitFlags()
@@ -45,7 +50,9 @@ func main() {
 	defer logs.FlushLogs()
 
 	verflag.PrintAndExitIfRequested()
+
 	//运行实际的kubelet，这个方法会一直运行，正常情况下不会退出。
+	//所有实际性的工作都在这里完成
 	if err := app.Run(s, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

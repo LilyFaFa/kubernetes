@@ -45,6 +45,7 @@ const maxQueuedEvents = 1000
 // EventSink must respect the namespace that will be embedded in 'event'.
 // It is assumed that EventSink will return the same sorts of errors as
 // pkg/client's REST client.
+// EventSink知道如何存储消息
 type EventSink interface {
 	Create(event *api.Event) (*api.Event, error)
 	Update(event *api.Event) (*api.Event, error)
@@ -52,7 +53,17 @@ type EventSink interface {
 }
 
 // EventRecorder knows how to record events on behalf of an EventSource.
-// 事件机制，三个方法的interface，这三个方法全都是记录事件用的
+// 事件机制，三个方法的interface，这三个方法全都是构造事件用的
+// 三个方法均是用于生成事件，并且发送给出去，只是可以接收的传入的类型不一致
+// 生成的事件写进watcher的channel之后EventBroadcaster读channel并且调用相应的处理函数
+// EventsRecorder主要被K8s的重要组件ControllerManager和Kubelet使用。
+// 比如，负责管理注册、注销等的NodeController，
+// 会将Node的状态变化信息记录为Events。DeploymentController会记录回滚、扩容等的Events。
+// 他们都在ControllerManager启动时被初始化并运行。
+// 与此同时Kubelet除了会记录它本身运行时的Events，
+// 比如：无法为Pod挂载卷、无法带宽整型等，还包含了一系列像docker_manager这样的小单元，
+//它们各司其职，并记录相关Events。
+
 type EventRecorder interface {
 	// Event constructs an event from the given information and puts it in the queue for sending.
 	// 'object' is the object this event is about. Event will make a reference-- or you may also
@@ -102,22 +113,25 @@ type EventBroadcaster interface {
 	// StartRecordingToSink starts sending events received from this EventBroadcaster to the given
 	// sink. The return value can be ignored or used to stop recording, if desired.
 
-	//StartRecordingToSink 和 StartLogging 是对 StartEventWatcher 的封装，
-	//分别实现了不同的处理函数
-	//发送给 apiserver
+	// StartRecordingToSink 和 StartLogging 是对 StartEventWatcher 的封装，
+	// 分别实现了不同的处理函数，然后将这个处理函数作为参数调用StartEventWatcher
+	// 发送给 apiserver
+	// 从sventBroadcaster接收信息并且发给apiserver
 	StartRecordingToSink(sink EventSink) watch.Interface
 
 	// StartLogging starts sending events received from this EventBroadcaster to the given logging
 	// function. The return value can be ignored or used to stop recording, if desired.
-	//StartRecordingToSink 和 StartLogging 是对 StartEventWatcher 的封装，
-	//分别实现了不同的处理函数
-	//写日志
+	// StartRecordingToSink 和 StartLogging 是对 StartEventWatcher 的封装，
+	// 分别实现了不同的处理函数，然后将这个处理函数作为参数嗲用StartEventWatcher
+	// 从eventBroadCaster接收信息并且给给定的logging
+	// 写日志
 	StartLogging(logf func(format string, args ...interface{})) watch.Interface
 
 	// NewRecorder returns an EventRecorder that can be used to send events to this EventBroadcaster
 	// with the event source set to the given event source.
 	// 创建一个事件机制，类似于一个事件记录仪，
-	// 用户可以通过它记录事件，它在内部会把事件发送给 EventBroadcaster
+	// 用户可以通过它记录事件，它在内部会把事件发送给 EventBroadcaster watch channel
+	// EventBroadcaster从channel中读取事件并且调用处理函数处理事件
 	NewRecorder(source api.EventSource) EventRecorder
 }
 
@@ -130,11 +144,11 @@ func NewBroadcasterForTests(sleepDuration time.Duration) EventBroadcaster {
 	return &eventBroadcasterImpl{watch.NewBroadcaster(maxQueuedEvents, watch.DropIfChannelFull), sleepDuration}
 }
 
-//实现接口EventBroadcaster
-//它的核心组件是 watch.Broadcaster，Broadcaster 就是广播的意思，
-//主要功能就是把发给它的消息，广播给所有的监听者（watcher）
-//它的实现代码在 pkg/watch/mux.go，我们不再深入剖析，
-//不过这部分代码如何使用 golang channel 是值得所有读者学习的。
+// 实现接口EventBroadcaster
+// 它的核心组件是 watch.Broadcaster，Broadcaster 就是广播的意思，
+// 主要功能就是把发给它的消息，广播给所有的监听者（watcher）
+// 它的实现代码在 pkg/watch/mux.go，我们不再深入剖析，
+// 不过这部分代码如何使用 golang channel 是值得所有读者学习的。
 type eventBroadcasterImpl struct {
 	//watch.Broadcaster 是一个分发器，内部保存了一个消息队列，
 	//可以通过 Watch 创建监听它内部的 worker。
@@ -151,6 +165,7 @@ type eventBroadcasterImpl struct {
 // TODO: make me an object with parameterizable queue length and retry interval
 // StartRecordingToSink 就是对 StartEventWatcher 的封装，
 // 将处理函数设置为 recordToSink
+// 也就是发送给apiserver
 func (eventBroadcaster *eventBroadcasterImpl) StartRecordingToSink(sink EventSink) watch.Interface {
 	// The default math/rand package functions aren't thread safe, so create a
 	// new Rand object for each StartRecording call.
@@ -168,6 +183,7 @@ func (eventBroadcaster *eventBroadcasterImpl) StartRecordingToSink(sink EventSin
 func recordToSink(sink EventSink, event *api.Event, eventCorrelator *EventCorrelator, randGen *rand.Rand, sleepDuration time.Duration) {
 	// Make a copy before modification, because there could be multiple listeners.
 	// Events are safe to copy like this.
+	//因为事件有很多watcher，所以对事件进行处理之前进行copy一份
 	eventCopy := *event
 	event = &eventCopy
 	//eventCorrelator.EventCorrelate 会对事件做预处理，
@@ -276,13 +292,16 @@ func (eventBroadcaster *eventBroadcasterImpl) StartLogging(logf func(format stri
 
 // StartEventWatcher starts sending events received from this EventBroadcaster to the given event handler function.
 // The return value can be ignored or used to stop recording, if desired.
-//它启动一个 goroutine，不断从 watcher.ResultChan() 中读取消息，
-//然后调用 eventHandler(event) 对事件进行处理。
+// 它启动一个 goroutine，不断从 watcher.ResultChan() 中读取消息，
+// 然后调用 eventHandler(event) 对事件进行处理。
 func (eventBroadcaster *eventBroadcasterImpl) StartEventWatcher(eventHandler func(*api.Event)) watch.Interface {
+	//实例化一个watcher，开始接收信息
 	watcher := eventBroadcaster.Watch()
+	//定义一个go routine，用来监视Broadcaster发来的Events
 	go func() {
 		defer utilruntime.HandleCrash()
 		for {
+			//如果watcher中监听到消息
 			watchEvent, open := <-watcher.ResultChan()
 			if !open {
 				return
@@ -293,6 +312,7 @@ func (eventBroadcaster *eventBroadcasterImpl) StartEventWatcher(eventHandler fun
 				// ever happen.
 				continue
 			}
+			//使用指定的处理函数对消息进行处理，写日志或者是发送给apiserver
 			eventHandler(event)
 		}
 	}()
@@ -315,10 +335,10 @@ type recorderImpl struct {
 
 //generateEvent 就是根据传入的参数，生成一个 api.Event 对象，并发送出去
 //参数分析
-//object：哪个组件/对象发出的事件，比如 kubelet 产生的事件会使用 node 对象
+//object：哪个组件/对象发出的事件
 //timestamp：事件产生的时间
 //eventtype：事件类型，目前有两种：Normal 和 Warning，分别代表正常的事件和可能有问题的事件，定义在 pkg/api/types.go 文件中，未来可能有其他类型的事件扩展
-//reason：事件产生的原因，可以在 pkg/kubelet/events/event.go 看到 kubelet 定义的所有事件类型
+//reason：  事件产生的原因，可以在 pkg/kubelet/events/event.go 看到 kubelet 定义的所有事件类型
 //message：事件的具体内容，用户可以理解的语句
 func (recorder *recorderImpl) generateEvent(object runtime.Object, timestamp unversioned.Time, eventtype, reason, message string) {
 	ref, err := api.GetReference(object)
@@ -346,6 +366,7 @@ func (recorder *recorderImpl) generateEvent(object runtime.Object, timestamp unv
 
 func validateEventType(eventtype string) bool {
 	switch eventtype {
+  //支持两类events
 	case api.EventTypeNormal, api.EventTypeWarning:
 		return true
 	}
@@ -364,6 +385,7 @@ func (recorder *recorderImpl) PastEventf(object runtime.Object, timestamp unvers
 	recorder.generateEvent(object, timestamp, eventtype, reason, fmt.Sprintf(messageFmt, args...))
 }
 
+//这个格式和kubectl get events的json格式一致
 func (recorder *recorderImpl) makeEvent(ref *api.ObjectReference, eventtype, reason, message string) *api.Event {
 	t := unversioned.Time{Time: recorder.clock.Now()}
 	namespace := ref.Namespace
@@ -384,4 +406,4 @@ func (recorder *recorderImpl) makeEvent(ref *api.ObjectReference, eventtype, rea
 		Count:          1,
 		Type:           eventtype,
 	}
-}
+}s

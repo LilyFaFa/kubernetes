@@ -448,6 +448,7 @@ func checkAndKeepInitContainers(pod *api.Pod, podStatus *kubecontainer.PodStatus
 }
 
 // computePodContainerChanges checks whether the pod spec has changed and returns the changes if true.
+// 这部分代码主要完成容器状态的变化统计，就是确定哪些容器要创建，哪些容器要删除。
 func (m *kubeGenericRuntimeManager) computePodContainerChanges(pod *api.Pod, podStatus *kubecontainer.PodStatus) podContainerSpecChanges {
 	glog.V(5).Infof("Syncing Pod %q: %+v", format.Pod(pod), pod)
 
@@ -475,6 +476,7 @@ func (m *kubeGenericRuntimeManager) computePodContainerChanges(pod *api.Pod, pod
 	// check the status of containers.
 	for index, container := range pod.Spec.Containers {
 		containerStatus := podStatus.FindContainerStatusByName(container.Name)
+		//如果容器处于停止状态或者没有状态，那么需要重启这个容器
 		if containerStatus == nil || containerStatus.State != kubecontainer.ContainerStateRunning {
 			if kubecontainer.ShouldContainerBeRestarted(&container, pod, podStatus) {
 				message := fmt.Sprintf("Container %+v is dead, but RestartPolicy says that we should restart it.", container)
@@ -510,6 +512,7 @@ func (m *kubeGenericRuntimeManager) computePodContainerChanges(pod *api.Pod, pod
 			message := fmt.Sprintf("Pod %q container %q hash changed (%d vs %d), it will be killed and re-created.",
 				pod.Name, container.Name, containerStatus.Hash, expectedHash)
 			glog.Info(message)
+			//在changes中放进重启信息
 			changes.ContainersToStart[index] = message
 			continue
 		}
@@ -546,7 +549,7 @@ func (m *kubeGenericRuntimeManager) computePodContainerChanges(pod *api.Pod, pod
 					break
 				}
 			}
-
+			//在changes放进杀死容器的信息
 			changes.ContainersToKill[containerStatus.ID] = containerToKillInfo{
 				name:      containerStatus.Name,
 				container: podContainer,
@@ -568,6 +571,7 @@ func (m *kubeGenericRuntimeManager) computePodContainerChanges(pod *api.Pod, pod
 //  6. Create normal containers.
 func (m *kubeGenericRuntimeManager) SyncPod(pod *api.Pod, _ api.PodStatus, podStatus *kubecontainer.PodStatus, pullSecrets []api.Secret, backOff *flowcontrol.Backoff) (result kubecontainer.PodSyncResult) {
 	// Step 1: Compute sandbox and container changes.
+	//这部分代码主要完成容器状态的变化统计，就是确定哪些容器要创建，哪些容器要删除。
 	podContainerChanges := m.computePodContainerChanges(pod, podStatus)
 	glog.V(3).Infof("computePodContainerChanges got %+v for pod %q", podContainerChanges, format.Pod(pod))
 	if podContainerChanges.CreateSandbox {
@@ -584,6 +588,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *api.Pod, _ api.PodStatus, podSt
 	}
 
 	// Step 2: Kill the pod if the sandbox has changed.
+	//这个主要是当沙箱变化的时候，需要重建pod，譬如切换了pause镜像，就会触发个操作
 	if podContainerChanges.CreateSandbox || (len(podContainerChanges.ContainersToKeep) == 0 && len(podContainerChanges.ContainersToStart) == 0) {
 		if len(podContainerChanges.ContainersToKeep) == 0 && len(podContainerChanges.ContainersToStart) == 0 {
 			glog.V(4).Infof("Stopping PodSandbox for %q because all other containers are dead.", format.Pod(pod))
@@ -599,6 +604,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *api.Pod, _ api.PodStatus, podSt
 		}
 	} else {
 		// Step 3: kill any running containers in this pod which are not to keep.
+		// 杀死运行的容器
 		for containerID, containerInfo := range podContainerChanges.ContainersToKill {
 			glog.V(3).Infof("Killing unwanted container %q(id=%q) for pod %q", containerInfo.name, containerID, format.Pod(pod))
 			killContainerResult := kubecontainer.NewSyncResult(kubecontainer.KillContainer, containerInfo.name)
@@ -629,6 +635,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *api.Pod, _ api.PodStatus, podSt
 	}
 
 	// Step 4: Create a sandbox for the pod if necessary.
+	//其实kubelet之所以引入沙箱，是想建立一个容器标准，这里可以简单理解成那个pause容器。所有的网络都是挂在这个基础容器里面。
 	podSandboxID := podContainerChanges.SandboxID
 	if podContainerChanges.CreateSandbox && len(podContainerChanges.ContainersToStart) > 0 {
 		var msg string
@@ -668,6 +675,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *api.Pod, _ api.PodStatus, podSt
 	}
 
 	// Step 5: start init containers.
+	//init容器是为业务容器做初始化工作的，譬如可以预先从网络上面加载一些动态资源
 	status, next, done := findNextInitContainerToRun(pod, podStatus)
 	if status != nil && status.ExitCode != 0 {
 		// container initialization has failed, flag the pod as failed
@@ -720,6 +728,9 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *api.Pod, _ api.PodStatus, podSt
 	}
 
 	// Step 6: start containers in podContainerChanges.ContainersToStart.
+	// 创建容器
+	// 就是通过读取podContainerChanges.ContainersToStart管道里面，
+	// 需要启动的容器，然后for循环逐一创建这个pod里面的container。
 	for idx := range podContainerChanges.ContainersToStart {
 		container := &pod.Spec.Containers[idx]
 		startContainerResult := kubecontainer.NewSyncResult(kubecontainer.StartContainer, container.Name)
@@ -733,6 +744,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *api.Pod, _ api.PodStatus, podSt
 		}
 
 		glog.V(4).Infof("Creating container %+v in pod %v", container, format.Pod(pod))
+		//通过请求OCI server创建容器，步骤有拉取镜像，容器创建等等
 		if msg, err := m.startContainer(podSandboxID, podSandboxConfig, container, pod, podStatus, pullSecrets, podIP); err != nil {
 			startContainerResult.Fail(err, msg)
 			utilruntime.HandleError(fmt.Errorf("container start failed: %v: %s", err, msg))

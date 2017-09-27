@@ -218,8 +218,10 @@ func RunInitMasterChecks(cfg *kubeadmapi.MasterConfiguration) error {
 	checks := []PreFlightCheck{
 		IsRootCheck{root: true},
 		HostnameCheck{},
+		//服务检测，需要先安装好kubelet
 		ServiceCheck{Service: "kubelet"},
 		ServiceCheck{Service: "docker"},
+		//端口开放和占用
 		PortOpenCheck{port: int(cfg.API.BindPort)},
 		PortOpenCheck{port: 2379},
 		PortOpenCheck{port: 8080},
@@ -228,6 +230,7 @@ func RunInitMasterChecks(cfg *kubeadmapi.MasterConfiguration) error {
 		PortOpenCheck{port: 10251},
 		PortOpenCheck{port: 10252},
 		HttpProxyCheck{Proto: "https", Host: cfg.API.AdvertiseAddresses[0], Port: int(cfg.API.BindPort)},
+		//文件的可用性
 		DirAvailableCheck{Path: "/etc/kubernetes/manifests"},
 		DirAvailableCheck{Path: "/etc/kubernetes/pki"},
 		DirAvailableCheck{Path: "/var/lib/etcd"},

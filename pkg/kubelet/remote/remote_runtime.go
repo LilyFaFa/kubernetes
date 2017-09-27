@@ -35,8 +35,10 @@ type RemoteRuntimeService struct {
 }
 
 // NewRemoteRuntimeService creates a new internalApi.RuntimeService.
+// 创建一个内部api runtimeService
 func NewRemoteRuntimeService(addr string, connectionTimout time.Duration) (internalApi.RuntimeService, error) {
 	glog.Infof("Connecting to runtime service %s", addr)
+	//与容器运行时建立gRPC连接。
 	conn, err := grpc.Dial(addr, grpc.WithInsecure(), grpc.WithTimeout(connectionTimout), grpc.WithDialer(dial))
 	if err != nil {
 		glog.Errorf("Connect remote runtime %s failed: %v", addr, err)
@@ -152,7 +154,7 @@ func (r *RemoteRuntimeService) ListPodSandbox(filter *runtimeApi.PodSandboxFilte
 func (r *RemoteRuntimeService) CreateContainer(podSandBoxID string, config *runtimeApi.ContainerConfig, sandboxConfig *runtimeApi.PodSandboxConfig) (string, error) {
 	ctx, cancel := getContextWithTimeout(r.timeout)
 	defer cancel()
-
+	//通过RPC请求gRPCserver在一个特定的pod中创建一个容器，给定podSandboxID
 	resp, err := r.runtimeClient.CreateContainer(ctx, &runtimeApi.CreateContainerRequest{
 		PodSandboxId:  &podSandBoxID,
 		Config:        config,

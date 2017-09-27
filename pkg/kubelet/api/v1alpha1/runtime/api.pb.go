@@ -3049,6 +3049,7 @@ func (c *runtimeServiceClient) RunPodSandbox(ctx context.Context, in *RunPodSand
 
 func (c *runtimeServiceClient) StopPodSandbox(ctx context.Context, in *StopPodSandboxRequest, opts ...grpc.CallOption) (*StopPodSandboxResponse, error) {
 	out := new(StopPodSandboxResponse)
+	//invoke发起一次请求连接
 	err := grpc.Invoke(ctx, "/runtime.RuntimeService/StopPodSandbox", in, out, c.cc, opts...)
 	if err != nil {
 		return nil, err

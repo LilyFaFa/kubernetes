@@ -53,6 +53,7 @@ func (f *FlagSet) BoolVar(p *bool, name string, value bool, usage string) {
 // BoolVarP is like BoolVar, but accepts a shorthand letter that can be used after a single dash.
 func (f *FlagSet) BoolVarP(p *bool, name, shorthand string, value bool, usage string) {
 	flag := f.VarPF(newBoolValue(value, p), name, shorthand, usage)
+	//flag是指针
 	flag.NoOptDefVal = "true"
 }
 

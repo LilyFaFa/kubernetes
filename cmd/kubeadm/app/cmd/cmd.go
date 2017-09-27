@@ -77,11 +77,17 @@ func NewKubeadmCommand(f cmdutil.Factory, in io.Reader, out, err io.Writer) *cob
 
 	cmds.ResetFlags()
 	cmds.SetGlobalNormalizationFunc(flag.WarnWordSepNormalizeFunc)
-
+	//支持的子命令，init，join，reset，token，version5种命令
+	//init用于初始化master节点
+	//看一下这个
 	cmds.AddCommand(NewCmdInit(out))
+	//join用于添加子节点
 	cmds.AddCommand(NewCmdJoin(out))
+	//reset用于集群的卸载
 	cmds.AddCommand(NewCmdReset(out))
+	//用于查询加入主节点的token
 	cmds.AddCommand(NewCmdToken(out))
+	//用于查看版本号
 	cmds.AddCommand(NewCmdVersion(out))
 
 	return cmds

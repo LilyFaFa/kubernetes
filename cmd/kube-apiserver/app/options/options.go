@@ -49,6 +49,7 @@ func NewServerRunOptions() *ServerRunOptions {
 	s := ServerRunOptions{
 		GenericServerRunOptions: genericoptions.NewServerRunOptions().WithEtcdOptions(),
 		EventTTL:                1 * time.Hour,
+		//kubelet的client配置
 		KubeletConfig: kubeletclient.KubeletClientConfig{
 			Port: ports.KubeletPort,
 			PreferredAddressTypes: []string{

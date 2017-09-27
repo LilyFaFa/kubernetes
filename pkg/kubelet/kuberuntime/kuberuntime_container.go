@@ -49,14 +49,17 @@ import (
 // * create the container
 // * start the container
 // * run the post start lifecycle hooks (if applicable)
+// 通过请求OCI server运行一个容器
 func (m *kubeGenericRuntimeManager) startContainer(podSandboxID string, podSandboxConfig *runtimeApi.PodSandboxConfig, container *api.Container, pod *api.Pod, podStatus *kubecontainer.PodStatus, pullSecrets []api.Secret, podIP string) (string, error) {
 	// Step 1: pull the image.
+	//获取镜像
 	err, msg := m.imagePuller.EnsureImageExists(pod, container, pullSecrets)
 	if err != nil {
 		return msg, err
 	}
 
 	// Step 2: create the container.
+	// 产生容器的配置信息
 	ref, err := kubecontainer.GenerateContainerRef(pod, container)
 	if err != nil {
 		glog.Errorf("Can't make a ref to pod %q, container %v: %v", format.Pod(pod), container.Name, err)
@@ -75,6 +78,7 @@ func (m *kubeGenericRuntimeManager) startContainer(podSandboxID string, podSandb
 		m.recorder.Eventf(ref, api.EventTypeWarning, events.FailedToCreateContainer, "Failed to create container with error: %v", err)
 		return "Generate Container Config Failed", err
 	}
+	//向grpc server请求创建一个容器
 	containerID, err := m.runtimeService.CreateContainer(podSandboxID, containerConfig, podSandboxConfig)
 	if err != nil {
 		m.recorder.Eventf(ref, api.EventTypeWarning, events.FailedToCreateContainer, "Failed to create container with error: %v", err)

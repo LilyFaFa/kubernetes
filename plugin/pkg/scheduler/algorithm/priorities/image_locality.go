@@ -29,6 +29,7 @@ import (
 // based on the total size of those images.
 // - If none of the images are present, this node will be given the lowest priority.
 // - If some of the images are present on a node, the larger their sizes' sum, the higher the node's priority.
+// 这个算法是根据Image是否在Node上及Image的大小，来为每个node打分
 func ImageLocalityPriorityMap(pod *api.Pod, meta interface{}, nodeInfo *schedulercache.NodeInfo) (schedulerapi.HostPriority, error) {
 	node := nodeInfo.Node()
 	if node == nil {
@@ -37,10 +38,14 @@ func ImageLocalityPriorityMap(pod *api.Pod, meta interface{}, nodeInfo *schedule
 
 	var sumSize int64
 	for i := range pod.Spec.Containers {
+		//检测pod的container需要的镜像是否在节点上
+		//如果在这个节点上，那么返回这个镜像的大小
 		sumSize += checkContainerImageOnNode(node, &pod.Spec.Containers[i])
 	}
 	return schedulerapi.HostPriority{
-		Host:  node.Name,
+		Host: node.Name,
+		// sumSize是指pod需要的镜像已经存在在这个pod上的大小
+		// 值是所有存在的镜像的大小的总和
 		Score: calculateScoreFromSize(sumSize),
 	}, nil
 }
@@ -48,6 +53,9 @@ func ImageLocalityPriorityMap(pod *api.Pod, meta interface{}, nodeInfo *schedule
 // calculateScoreFromSize calculates the priority of a node. sumSize is sum size of requested images on this node.
 // 1. Split image size range into 10 buckets.
 // 2. Decide the priority of a given sumSize based on which bucket it belongs to.
+// 将镜像的大小范围分成10个buckets，看一下节点上已经存在的镜像在哪个范围
+// minImgSize int64 = 23 * mb
+// maxImgSize int64 = 1000 * mb
 func calculateScoreFromSize(sumSize int64) int {
 	var score int
 	switch {
@@ -71,6 +79,7 @@ func checkContainerImageOnNode(node *api.Node, container *api.Container) int64 {
 		for _, name := range image.Names {
 			if container.Image == name {
 				// Should return immediately.
+				//如果镜像存在节点上，那么就返回镜像的大小
 				return image.SizeBytes
 			}
 		}

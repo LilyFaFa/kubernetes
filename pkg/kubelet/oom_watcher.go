@@ -36,6 +36,7 @@ type realOOMWatcher struct {
 	recorder record.EventRecorder
 }
 
+//参数recorder就是kubeDeps.Recorder，可以往里面写事件。
 func NewOOMWatcher(cadvisor cadvisor.Interface, recorder record.EventRecorder) OOMWatcher {
 	return &realOOMWatcher{
 		cadvisor: cadvisor,

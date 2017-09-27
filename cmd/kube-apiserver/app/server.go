@@ -80,12 +80,19 @@ cluster's shared state through which all other components interact.`,
 
 // Run runs the specified APIServer.  This should never exit.
 func Run(s *options.ServerRunOptions) error {
+	//检测etcd存储后端参数的有效性
 	genericvalidation.VerifyEtcdServersList(s.GenericServerRunOptions)
+	//检测一些运行参数的有效性，并且也会设置一些默认值
 	genericapiserver.DefaultAndValidateRunOptions(s.GenericServerRunOptions)
+	// 根据之前初始化的GenericServerRunOptions对象来初始化创建genericapiserver.config
+	// NewConfig()是初始化了一个默认的config，
+	// ApplyOptions()根据GenericServerRunOptions进行再一遍的初始化
+	// Complete()对一些没填充的字段，可以根据别的字段进行初始化
+	// 实际NewConfig()中也调用了ApplyOptions()接口，只是参数是default值
 	genericConfig := genericapiserver.NewConfig(). // create the new config
 							ApplyOptions(s.GenericServerRunOptions). // apply the options selected
 							Complete()                               // set default values based on the known values
-
+		// 根据ServiceClusterIPRange输入参数，获取IPRange和ServiceIP
 	serviceIPRange, apiServerServiceIP, err := genericapiserver.DefaultServiceIPRange(s.GenericServerRunOptions.ServiceClusterIPRange)
 	if err != nil {
 		glog.Fatalf("Error determining service IP ranges: %v", err)
@@ -93,7 +100,7 @@ func Run(s *options.ServerRunOptions) error {
 	if err := genericConfig.MaybeGenerateServingCerts(apiServerServiceIP); err != nil {
 		glog.Fatalf("Failed to generate service certificate: %v", err)
 	}
-
+	// 有需要的话生成证书
 	capabilities.Initialize(capabilities.Capabilities{
 		AllowPrivileged: s.AllowPrivileged,
 		// TODO(vmarmol): Implement support for HostNetworkSources.

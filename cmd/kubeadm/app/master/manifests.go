@@ -53,14 +53,19 @@ const (
 
 // WriteStaticPodManifests builds manifest objects based on user provided configuration and then dumps it to disk
 // where kubelet will pick and schedule them.
+// 使用kubelet需要调度的pod配置
 func WriteStaticPodManifests(cfg *kubeadmapi.MasterConfiguration) error {
 	// Prepare static pod specs
 	staticPodSpecs := map[string]api.Pod{
+		// apiserverPod的配置
 		kubeAPIServer: componentPod(api.Container{
-			Name:          kubeAPIServer,
-			Image:         images.GetCoreImage(images.KubeAPIServerImage, cfg, kubeadmapi.GlobalEnvParams.HyperkubeImage),
-			Command:       getAPIServerCommand(cfg),
-			VolumeMounts:  []api.VolumeMount{certsVolumeMount(), k8sVolumeMount()},
+			Name:  kubeAPIServer,
+			Image: images.GetCoreImage(images.KubeAPIServerImage, cfg, kubeadmapi.GlobalEnvParams.HyperkubeImage),
+			//apiserver的配置信息
+			//看一下配置信息的生成
+			Command:      getAPIServerCommand(cfg),
+			VolumeMounts: []api.VolumeMount{certsVolumeMount(), k8sVolumeMount()},
+			//存活探针
 			LivenessProbe: componentProbe(8080, "/healthz"),
 			Resources:     componentResources("250m"),
 		}, certsVolume(cfg), k8sVolume(cfg)),
@@ -117,6 +122,7 @@ func WriteStaticPodManifests(cfg *kubeadmapi.MasterConfiguration) error {
 		if err != nil {
 			return fmt.Errorf("<master/manifests> failed to marshall manifest for %q to JSON [%v]", name, err)
 		}
+		//根据staticPodSpecs创建各个组件的配置文件
 		if err := cmdutil.DumpReaderToFile(bytes.NewReader(serialized), filename); err != nil {
 			return fmt.Errorf("<master/manifests> failed to create static pod manifest file for %q (%q) [%v]", name, filename, err)
 		}
@@ -229,6 +235,7 @@ func getComponentBaseCommand(component string) (command []string) {
 }
 
 func getAPIServerCommand(cfg *kubeadmapi.MasterConfiguration) (command []string) {
+	//创建的apiserver的参数情况，如果需要更改初始化apiserver的参数可以对这里进行更改
 	command = append(getComponentBaseCommand(apiServer),
 		"--insecure-bind-address=127.0.0.1",
 		"--admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,ResourceQuota",

@@ -99,8 +99,10 @@ const (
 	workerBackOffPeriodJitterFactor = 0.5
 )
 
+//pod任务的执行者，创建pod，更新pod，处理updates中的事件
 type podWorkers struct {
 	// Protects all per worker fields.
+	//锁，用于worker之间资源互斥
 	podLock sync.Mutex
 
 	// Tracks all running per-pod goroutines - per-pod goroutine will be
@@ -122,6 +124,7 @@ type podWorkers struct {
 	syncPodFn syncPodFnType
 
 	// The EventRecorder to use
+	//kubeDeps.Recorder用于写事件，这个事件会被写日志和发送给apiserver
 	recorder record.EventRecorder
 
 	// backOffPeriod is the duration to back off when there is a sync error.
