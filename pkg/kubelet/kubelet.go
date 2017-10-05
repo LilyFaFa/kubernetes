@@ -263,10 +263,12 @@ func makePodSourceConfig(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps
 		//都会促发Mux的Merge函数用来合并更新的信息，这里podCfg有是哪个数据源，
 		//即kubetypes.FileSource、kubetypes.HTTPSource和kubetypes.ApiserverSource
 		//cfg.Channel
+		//使用cfg.Channel文件数据源
 		config.NewSourceFile(kubeCfg.PodManifestPath, nodeName, kubeCfg.FileCheckFrequency.Duration, cfg.Channel(kubetypes.FileSource))
 	}
 
 	// define url config source
+	// url数据源
 	if kubeCfg.ManifestURL != "" {
 		glog.Infof("Adding manifest url %q with HTTP header %v", kubeCfg.ManifestURL, manifestURLHeader)
 		config.NewSourceURL(kubeCfg.ManifestURL, manifestURLHeader, nodeName, kubeCfg.HTTPCheckFrequency.Duration, cfg.Channel(kubetypes.HTTPSource))
@@ -609,6 +611,7 @@ func NewMainKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *Kub
 			// integration.
 			// TODO: Remove this knob once we switch to using GRPC completely.
 			overGRPC := true
+			//与docker的通信方式是否是gRPC
 			if overGRPC {
 				const (
 					// The unix socket for kubelet <-> dockershim communication.
@@ -817,7 +820,7 @@ func NewMainKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *Kub
 		kubeDeps.Recorder,
 		kubeCfg.ExperimentalCheckNodeCapabilitiesBeforeMount)
 
-	// 保存了节点上正在运行的 pod 信息
+	// 用于缓存了节点上正在运行的 pod 信息
 	runtimeCache, err := kubecontainer.NewRuntimeCache(klet.containerRuntime)
 	if err != nil {
 		return nil, err
@@ -902,6 +905,7 @@ type Kubelet struct {
 	nodeName types.NodeName
 	//与docker进行交互
 	dockerClient dockertools.DockerInterface
+	//缓存节点上运行的pod的信息
 	runtimeCache kubecontainer.RuntimeCache
 	//与apiServer进行交互
 	kubeClient    clientset.Interface
@@ -1302,6 +1306,7 @@ func (kl *Kubelet) initializeModules() error {
 
 // initializeRuntimeDependentModules will initialize internal modules that require the container runtime to be up.
 func (kl *Kubelet) initializeRuntimeDependentModules() {
+	//调用cadvisor.Start()函数
 	if err := kl.cadvisor.Start(); err != nil {
 		// Fail kubelet and rely on the babysitter to retry starting kubelet.
 		// TODO(random-liu): Add backoff logic in the babysitter
@@ -1338,6 +1343,7 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 		go wait.Until(kl.syncNodeStatus, kl.nodeStatusUpdateFrequency, wait.NeverStop)
 	}
 	go wait.Until(kl.syncNetworkStatus, 30*time.Second, wait.NeverStop)
+	//
 	go wait.Until(kl.updateRuntimeUp, 5*time.Second, wait.NeverStop)
 
 	// Start loop to sync iptables util rules
@@ -2212,6 +2218,7 @@ func (kl *Kubelet) LatestLoopEntryTime() time.Time {
 // the runtime dependent modules when the container runtime first comes up,
 // and returns an error if the status check fails.  If the status check is OK,
 // update the container runtime uptime in the kubelet runtimeState.
+// 如果容器第一次起来初始化runtime的环境依赖
 func (kl *Kubelet) updateRuntimeUp() {
 	s, err := kl.containerRuntime.Status()
 	if err != nil {
@@ -2247,6 +2254,7 @@ func (kl *Kubelet) updateRuntimeUp() {
 			return
 		}
 	}
+	// 运行容器监控cAdvisor container manager.
 	kl.oneTimeInitializer.Do(kl.initializeRuntimeDependentModules)
 	kl.runtimeState.setRuntimeSync(kl.clock.Now())
 }

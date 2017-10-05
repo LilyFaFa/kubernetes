@@ -68,6 +68,7 @@ type PodConfig struct {
 
 // NewPodConfig creates an object that can merge many configuration sources into a stream
 // of normalized updates to a pod configuration.
+// updates是一个容量为50的chaanel，存储三个来源对pod的操作
 func NewPodConfig(mode PodConfigNotificationMode, recorder record.EventRecorder) *PodConfig {
 	updates := make(chan kubetypes.PodUpdate, 50)
 	storage := newPodStorage(updates, mode, recorder)
@@ -185,6 +186,7 @@ func (s *podStorage) Merge(source string, change interface{}) error {
 		}
 
 	case PodConfigNotificationSnapshotAndUpdates:
+		//将remove和add操作合并
 		if len(removes.Pods) > 0 || len(adds.Pods) > 0 || firstSet {
 			s.updates <- kubetypes.PodUpdate{Pods: s.MergedState().([]*api.Pod), Op: kubetypes.SET, Source: source}
 		}
@@ -196,6 +198,7 @@ func (s *podStorage) Merge(source string, change interface{}) error {
 		}
 
 	case PodConfigNotificationSnapshot:
+		//将所有操作合并
 		if len(updates.Pods) > 0 || len(deletes.Pods) > 0 || len(adds.Pods) > 0 || len(removes.Pods) > 0 || firstSet {
 			s.updates <- kubetypes.PodUpdate{Pods: s.MergedState().([]*api.Pod), Op: kubetypes.SET, Source: source}
 		}

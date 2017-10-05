@@ -24,15 +24,19 @@ import (
 )
 
 // GetContainerInfo returns stats (from Cadvisor) for a container.
+// 获取容器的资源使用情况，这里直接获取的是dockercontainer的
 func (kl *Kubelet) GetContainerInfo(podFullName string, podUID types.UID, containerName string, req *cadvisorapi.ContainerInfoRequest) (*cadvisorapi.ContainerInfo, error) {
 
+	//得到pod的UID
 	podUID = kl.podManager.TranslatePodUID(podUID)
-
+	//从缓存中获取pod列表
 	pods, err := kl.runtimeCache.GetPods()
 	if err != nil {
 		return nil, err
 	}
 	pod := kubecontainer.Pods(pods).FindPod(podFullName, podUID)
+	//获取pod中的容器，如果pod中由多个容器，那么返回第一个容器
+	//pod容器共享pod的资源，所以容器的资源视角都是一样的
 	container := pod.FindContainerByName(containerName)
 	if container == nil {
 		return nil, kubecontainer.ErrContainerNotFound

@@ -45,6 +45,8 @@ type KubeDNSConfig struct {
 	ConfigMap   string
 }
 
+// 先是通过options.NewKubeDNSConfig获取kubedns默认启动参数，
+// 包括绑定地址，监听端口，默认域名和监控检查端口等信息
 func NewKubeDNSConfig() *KubeDNSConfig {
 	return &KubeDNSConfig{
 		ClusterDomain:  "cluster.local.",

@@ -50,6 +50,7 @@ func New(backend Backend, config *Config) *server {
 }
 
 // Run is a blocking operation that starts the server listening on the DNS ports.
+// 启动服务，是一个阻塞操作，监听dns ports
 func (s *server) Run() error {
 	mux := dns.NewServeMux()
 	mux.Handle(".", s)
@@ -200,7 +201,7 @@ func (s *server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	}
 
 	for zone, ns := range *s.config.stub {
-		if strings.HasSuffix(name, "." + zone) || name == zone {
+		if strings.HasSuffix(name, "."+zone) || name == zone {
 			metrics.ReportRequestCount(req, metrics.Stub)
 
 			resp := s.ServeDNSStubForward(w, req, ns)
@@ -232,7 +233,7 @@ func (s *server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 		return
 	}
 
-	if q.Qclass != dns.ClassCHAOS && !strings.HasSuffix(name, "." +s.config.Domain) && name != s.config.Domain {
+	if q.Qclass != dns.ClassCHAOS && !strings.HasSuffix(name, "."+s.config.Domain) && name != s.config.Domain {
 		metrics.ReportRequestCount(req, metrics.Rec)
 
 		resp := s.ServeDNSForward(w, req)

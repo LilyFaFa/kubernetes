@@ -133,6 +133,7 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 	} else {
 		glog.Errorf("unable to register configz: %s", err)
 	}
+	// 确定协议是IPv4还是IPv6
 	protocol := utiliptables.ProtocolIpv4
 	if net.ParseIP(config.BindAddress).To4() == nil {
 		protocol = utiliptables.ProtocolIpv6
@@ -143,6 +144,7 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 	var dbus utildbus.Interface
 
 	// Create a iptables utils.
+	// 创建一个iptables的utils
 	execer := exec.New()
 
 	if runtime.GOOS == "windows" {
@@ -161,6 +163,7 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 	}
 
 	// TODO(vmarmol): Use container config for this.
+	//设置oomAdjuster
 	var oomAdjuster *oom.OOMAdjuster
 	if config.OOMScoreAdj != nil {
 		oomAdjuster = oom.NewOOMAdjuster()
@@ -196,7 +199,7 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 	// Override kubeconfig qps/burst settings from flags
 	kubeconfig.QPS = config.KubeAPIQPS
 	kubeconfig.Burst = int(config.KubeAPIBurst)
-
+	// 创建一个kubeclient
 	client, err := clientset.NewForConfig(kubeconfig)
 	if err != nil {
 		glog.Fatalf("Invalid API configuration: %v", err)
@@ -204,24 +207,34 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 
 	// Create event recorder
 	hostname := nodeutil.GetHostname(config.HostnameOverride)
+	// 创建事件广播机制，类似于kubelet。
 	eventBroadcaster := record.NewBroadcaster()
 	recorder := eventBroadcaster.NewRecorder(api.EventSource{Component: "kube-proxy", Host: hostname})
 
 	var proxier proxy.ProxyProvider
 	var endpointsHandler proxyconfig.EndpointsConfigHandler
 
+	//定义proxier和endpointsHandler，分别用于处理services和endpoints的update event
 	proxyMode := getProxyMode(string(config.Mode), client.Core().Nodes(), hostname, iptInterface, iptables.LinuxKernelCompatTester{})
+	//判断proxyMode是否为iptables模式
 	if proxyMode == proxyModeIPTables {
 		glog.V(0).Info("Using iptables Proxier.")
 		if config.IPTablesMasqueradeBit == nil {
 			// IPTablesMasqueradeBit must be specified or defaulted.
 			return nil, fmt.Errorf("Unable to read IPTablesMasqueradeBit from config")
 		}
+		// 调用pkg/proxy/iptables/proxier.go:222中的iptables.NewProxier
+		// 来创建proxier，赋值给前面定义的proxier和endpointsHandler，
+		// 表示由该proxier同时负责service和endpoint的event处理。
 		proxierIPTables, err := iptables.NewProxier(iptInterface, utilsysctl.New(), execer, config.IPTablesSyncPeriod.Duration, config.IPTablesMinSyncPeriod.Duration, config.MasqueradeAll, int(*config.IPTablesMasqueradeBit), config.ClusterCIDR, hostname, getNodeIP(client, hostname))
 		if err != nil {
 			glog.Fatalf("Unable to create proxier: %v", err)
 		}
+		//监听到service资源有变化收到信号之后的处理函数
+		//将会在后面的serviceConfig中间件使用
 		proxier = proxierIPTables
+		//监听到endpoint资源有变化收到信号之后的处理函数
+		//将会在后面的endpointConfig中间件使用
 		endpointsHandler = proxierIPTables
 		// No turning back. Remove artifacts that might still exist from the userspace Proxier.
 		glog.V(0).Info("Tearing down userspace rules.")
@@ -277,16 +290,33 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 	// Note: RegisterHandler() calls need to happen before creation of Sources because sources
 	// only notify on changes, and the initial update (on process start) may be lost if no handlers
 	// are registered yet.
+	// 这个类似于kubelet的podconfig中间件
+	// serviceconfig是一个关于service的中间件
+	// nodepoint是一个关于nodepoint的中间件
+	// 创建一个serviceConfig,包括一个updates的channel，Servicestore，broadCaster
+	// return &ServiceConfig{mux, bcaster, store}
+	// 在ServiceConfig注册了一个事件监听者serviceConfig.RegisterHandler(proxier)
+	// serviceConfig的bcaster维护一个监听者的列表
+	// 将proxier添加到监听列表
 	serviceConfig := proxyconfig.NewServiceConfig()
 	serviceConfig.RegisterHandler(proxier)
-
+	// 创建一个EndpointsConfig
+	// 在EndpointsConfig注册了一个事件监听者endpointsConfig.RegisterHandler(proxier)
+	// 将proxier添加到监听列表
 	endpointsConfig := proxyconfig.NewEndpointsConfig()
 	endpointsConfig.RegisterHandler(endpointsHandler)
 
+	//创建service和endpoint的listWatch
 	proxyconfig.NewSourceAPI(
 		client.Core().RESTClient(),
 		config.ConfigSyncPeriod,
+		// 使用serviceConfig创建一个source事件源和这个事件源的Channel，
+		// 这个channel给listwatch作数据存储的store
+		// 这样listWatch的事件也就直接写进这个事件源的channel之中
+		// 然后Merge处理后写进updates中，watchForUpdates监听updates通知到所有listener
 		serviceConfig.Channel("api"),
+		// 使用endpointsConfig创建一个source事件源和这个事件源的Channel，
+		// 这个channel给listwatch作数据存储的store
 		endpointsConfig.Channel("api"),
 	)
 

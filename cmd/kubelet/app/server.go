@@ -308,6 +308,8 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.KubeletDeps) (err error) {
 	//一种是传统的通过watch kube-apiserver获取pod信息，
 	//一种是通过文件获取，最后一种是通过http获取，后两种模式下，我们称kubelet运行于standalone模式
 	//1.3版本是这么分析的
+	//standaloneMode就是不依赖kubernetes集群，节点的pod和容器由kubelet创建
+	//创建pod可以从文件目录/etc/kuberntes/manifests目录下直接创建
 	standaloneMode := (len(s.APIServerList) == 0 && !s.RequireKubeConfig)
 	// ExitOnLockContention是一个标志，表示kubelet它以“引导“模式运行。
 	// 这需要“LockFilePath”已设置。
@@ -415,6 +417,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.KubeletDeps) (err error) {
 			if s.RequireKubeConfig {
 				return fmt.Errorf("invalid kubeconfig: %v", err)
 			}
+			//如果实在standaloneMode模式下，那么创建不了client不报错，因为不需要联系kube-apiserver
 			if standaloneMode {
 				glog.Warningf("No API client: %v", err)
 			}
@@ -451,6 +454,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.KubeletDeps) (err error) {
 	}
 
 	//  创建 ContainerManager 对象，管理机器上的容器
+	//  将kubeDeps.CAdvisorInterface传过去，以便监控信息
 	if kubeDeps.ContainerManager == nil {
 		if s.SystemCgroups != "" && s.CgroupRoot == "" {
 			return fmt.Errorf("invalid configuration: system container was specified and cgroup root was not specified")

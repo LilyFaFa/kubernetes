@@ -543,6 +543,7 @@ func (p Pods) FindPod(podFullName string, podUID types.UID) Pod {
 // FindContainerByName returns a container in the pod with the given name.
 // When there are multiple containers with the same name, the first match will
 // be returned.
+//获取pod中运行的容器，如果pod中有多个容器在运行，则返回第一个
 func (p *Pod) FindContainerByName(containerName string) *Container {
 	for _, c := range p.Containers {
 		if c.Name == containerName {

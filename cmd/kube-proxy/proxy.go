@@ -37,7 +37,9 @@ func init() {
 }
 
 func main() {
+	// 创建默认配置文件
 	config := options.NewProxyConfig()
+	//用kube-proxy命令行的参数替换默认参数
 	config.AddFlags(pflag.CommandLine)
 
 	flag.InitFlags()
@@ -45,9 +47,8 @@ func main() {
 	defer logs.FlushLogs()
 
 	verflag.PrintAndExitIfRequested()
-
-	s, err := app.NewProxyServerDefault(config)
-	if err != nil {
+	//根据config创建ProxyServer，进入看一下创建详细
+	s, err := app.NewProxyServerDefault(config) if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}

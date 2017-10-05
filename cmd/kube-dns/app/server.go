@@ -49,6 +49,10 @@ type KubeDNSServer struct {
 func NewKubeDNSServerDefault(config *options.KubeDNSConfig) *KubeDNSServer {
 	ks := KubeDNSServer{domain: config.ClusterDomain}
 
+	// 创建一个与kubernetes通信的kubeclient
+	// 一个与apiserver通信的client，有两种模式的client可以使用。
+	// 集群内client（通过serviceAccount认证）
+	// 以及集群外client（当前Kubernetes集群配置的其他认证方式进行认证）
 	kubeClient, err := newKubeClient(config)
 	if err != nil {
 		glog.Fatalf("Failed to create a kubernetes client: %v", err)
@@ -59,6 +63,7 @@ func NewKubeDNSServerDefault(config *options.KubeDNSConfig) *KubeDNSServer {
 	ks.dnsPort = config.DNSPort
 
 	var configSync dnsConfig.Sync
+	//kubedns的配置方式：ConfigMap还是ConfigDir
 	if config.ConfigMap == "" {
 		glog.V(0).Infof("ConfigMap not configured, using values from command line flags")
 		configSync = dnsConfig.NewNopSync(
@@ -69,7 +74,7 @@ func NewKubeDNSServerDefault(config *options.KubeDNSConfig) *KubeDNSServer {
 		configSync = dnsConfig.NewSync(
 			kubeClient, config.ConfigMapNs, config.ConfigMap)
 	}
-
+	//创建一个kubeDNS
 	ks.kd = kdns.NewKubeDNS(kubeClient, config.ClusterDomain, configSync)
 
 	return &ks
@@ -112,9 +117,16 @@ func (server *KubeDNSServer) Run() {
 	pflag.VisitAll(func(flag *pflag.Flag) {
 		glog.V(0).Infof("FLAG: --%s=%q", flag.Name, flag.Value)
 	})
+	// 屏蔽系统停止信号（SIGTERM、SIGINT），除非kill -9(SIGKILL)
+	// 监听系统事件，主要作用是等待日志处理完成
 	setupSignalHandlers()
+	// 启动skydns服务，它是一个DNS服务，看一下这个函数
+	// 这个是主要的函数
 	server.startSkyDNSServer()
+	// 启动对kubernetes api的listwatch，也就是创建的service和endpoint的listwatch
 	server.kd.Start()
+	// 为kubedns提供健康检查服务
+	// 添加两个http方法，/readiness用于健康检查，/cache返回当前dns中缓存的dns记录JSON
 	server.setupHandlers()
 
 	glog.V(0).Infof("Status HTTP port %v", server.healthzPort)
@@ -151,6 +163,7 @@ func setupSignalHandlers() {
 	}()
 }
 
+//启动DNS域名解析
 func (d *KubeDNSServer) startSkyDNSServer() {
 	glog.V(0).Infof("Starting SkyDNS server (%v:%v)", d.dnsBindAddress, d.dnsPort)
 	skydnsConfig := &server.Config{
@@ -158,6 +171,7 @@ func (d *KubeDNSServer) startSkyDNSServer() {
 		DnsAddr: fmt.Sprintf("%s:%d", d.dnsBindAddress, d.dnsPort),
 	}
 	server.SetDefaults(skydnsConfig)
+	//创建一个server
 	s := server.New(d.kd, skydnsConfig)
 	if err := metrics.Metrics(); err != nil {
 		glog.Fatalf("Skydns metrics error: %s", err)
@@ -166,6 +180,6 @@ func (d *KubeDNSServer) startSkyDNSServer() {
 	} else {
 		glog.V(0).Infof("Skydns metrics not enabled")
 	}
-
+	//启动这个server，看一下这个
 	go s.Run()
 }

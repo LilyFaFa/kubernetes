@@ -61,44 +61,60 @@ const (
 	nodeCacheTTL = 180 * time.Second
 )
 
+// 接下来了解一下kube-dns支持的域名格式，
+// 具体为：<service_name>.<namespace>.svc.<cluster_domain>。
+// 其中cluster_domain可以使用kubelet的–cluster-domain=SomeDomain参数进行设置，
+// 同时也要保证kube2sky容器的启动参数中–domain参数设置了相同的值。
+// 通常设置为cluster.local。
+//那么之前示例中的my-nginx Service对应的完整域名就是my-nginx.default.svc.cluster.local。
 type KubeDNS struct {
 	// kubeClient makes calls to API Server and registers calls with API Server
 	// to get Endpoints and Service objects.
+	//与apiserver通信的client
 	kubeClient clientset.Interface
 
 	// domain for which this DNS Server is authoritative.
+	//域名
 	domain string
 	// configMap where kube-dns dynamic configuration is store. If this
 	// is empty then getting configuration from a configMap will be
 	// disabled.
+	// configMap的名称，默认为空，使用命令行参数
 	configMap string
 
 	// endpointsStore that contains all the endpoints in the system.
+	// 存储集群中所有的endpoints
 	endpointsStore kcache.Store
 	// servicesStore that contains all the services in the system.
+	// 存储集群中所有的services
 	servicesStore kcache.Store
 	// nodesStore contains some subset of nodes in the system so that we
 	// can retrieve the cluster zone annotation from the cached node
 	// instead of getting it from the API server every time.
+	// 存储集群中所有的nodes
 	nodesStore kcache.Store
 
 	// cache stores DNS records for the domain.  A Records and SRV Records for
 	// (regular) services and headless Services.  CNAME Records for
 	// ExternalName Services.
+	// dns缓存
 	cache treecache.TreeCache
 	// TODO(nikhiljindal): Remove this. It can be recreated using
 	// clusterIPServiceMap.
+	// PTR记录 ip --> skymsg.Service
 	reverseRecordMap map[string]*skymsg.Service
 	// clusterIPServiceMap to service object. Headless services are not
 	// part of this map. Used to get a service when given its cluster
 	// IP.  Access to this is coordinated using cacheLock. We use the
 	// same lock for cache and this map to ensure that they don't get
 	// out of sync.
+	// 集群服务列表 ip --> v1.Service
 	clusterIPServiceMap map[string]*kapi.Service
 	// cacheLock protecting the cache. caller is responsible for using
 	// the cacheLock before invoking methods on cache the cache is not
 	// thread-safe, and the caller can guarantee thread safety by using
 	// the cacheLock
+	// 缓存锁，更新上述三者的数据时，需加锁
 	cacheLock sync.RWMutex
 
 	// The domain for which this DNS Server is authoritative, in array
@@ -107,8 +123,10 @@ type KubeDNS struct {
 	domainPath []string
 
 	// endpointsController  invokes registered callbacks when endpoints change.
+	// endpointsController 管理endpoints的变更
 	endpointsController *kcache.Controller
 	// serviceController invokes registered callbacks when services change.
+	// serviceController 管理services的变更
 	serviceController *kcache.Controller
 
 	// config set from the dynamic configuration source.
@@ -120,9 +138,14 @@ type KubeDNS struct {
 }
 
 func NewKubeDNS(client clientset.Interface, clusterDomain string, configSync config.Sync) *KubeDNS {
+	//创建一个kubeDNS
 	kd := &KubeDNS{
-		kubeClient:          client,
-		domain:              clusterDomain,
+		kubeClient: client,
+		domain:     clusterDomain,
+		// TreeCache的结构类似于目录树。
+		// 从根节点到叶子节点的每个路径与一个域名是相对应的，顺序是颠倒的。
+		// 它的叶子节点只包含Entries，非叶子节点只包含ChildNodes也就是子节点的指针。
+		// 叶子节点中保存的就是SkyDNS定义的msg.Service结构，可以理解为DNS记录。
 		cache:               treecache.NewTreeCache(),
 		cacheLock:           sync.RWMutex{},
 		nodesStore:          kcache.NewStore(kcache.MetaNamespaceKeyFunc),
@@ -133,13 +156,15 @@ func NewKubeDNS(client clientset.Interface, clusterDomain string, configSync con
 		configLock: sync.RWMutex{},
 		configSync: configSync,
 	}
-
+	//创建endpoint的list-watch服务
 	kd.setEndpointsStore()
+	//创建service的list-watch服务
 	kd.setServicesStore()
 
 	return kd
 }
 
+//将创建的两类listWatch监听启动起来
 func (kd *KubeDNS) Start() {
 	glog.V(2).Infof("Starting endpointsController")
 	go kd.endpointsController.Run(wait.NeverStop)
@@ -216,6 +241,8 @@ func (kd *KubeDNS) GetCacheAsJSON() (string, error) {
 
 func (kd *KubeDNS) setServicesStore() {
 	// Returns a cache.ListWatch that gets all changes to services.
+	//创建一个service的listWatch监听apiserver集群中的service变化
+	//这里使用了先前创建的kubeClient
 	kd.servicesStore, kd.serviceController = kcache.NewInformer(
 		&kcache.ListWatch{
 			ListFunc: func(options kapi.ListOptions) (runtime.Object, error) {
@@ -228,15 +255,25 @@ func (kd *KubeDNS) setServicesStore() {
 		&kapi.Service{},
 		resyncPeriod,
 		kcache.ResourceEventHandlerFuncs{
-			AddFunc:    kd.newService,
+			//创建服务的处理函数
+			AddFunc: kd.newService,
+			//删除服务的处理函数
 			DeleteFunc: kd.removeService,
+			//更新服务的处理函数
 			UpdateFunc: kd.updateService,
 		},
 	)
 }
 
+// DNS是提供service域名解析，服务的，
+// 应该是只要将service的域名解析到clusterIP就可以，为啥还要同步endpoint呢？
+// 因为有个特殊的服务headless service（不依赖k8s负载均衡，直接映射到后端容器endpoint），
+// 所以这里必须还需要有一个endpoint的同步服务。
 func (kd *KubeDNS) setEndpointsStore() {
 	// Returns a cache.ListWatch that gets all changes to endpoints.
+	//创建一个endpoint的listWatch监听apiserver集群中的endpoint变化
+	//这里使用了先前创建的kubeClient
+	//具体listwatch细节可以看源码
 	kd.endpointsStore, kd.endpointsController = kcache.NewInformer(
 		&kcache.ListWatch{
 			ListFunc: func(options kapi.ListOptions) (runtime.Object, error) {
@@ -260,6 +297,7 @@ func (kd *KubeDNS) setEndpointsStore() {
 	)
 }
 
+//确认是serivce资源创建
 func assertIsService(obj interface{}) (*kapi.Service, bool) {
 	if service, ok := obj.(*kapi.Service); ok {
 		return service, ok
@@ -269,17 +307,26 @@ func assertIsService(obj interface{}) (*kapi.Service, bool) {
 	}
 }
 
+// 创建服务的处理函数
+// 根据service的类型，生成不同类型的dns记录。
+// ExternalName类型的service是CNAME，只在dns缓存（KubeDNS.cache）中存储该记录；
+// Headless（无ClusterIp）类型的service不在KubeDNS.clusterIPServiceMap中记录；
+// 而其他类型的service则在cache，reverseRecordMap，clusterIPServiceMap中一并存储
 func (kd *KubeDNS) newService(obj interface{}) {
+	//确认创建的资源类型是service
 	if service, ok := assertIsService(obj); ok {
 		glog.V(2).Infof("New service: %v", service.Name)
 		glog.V(4).Infof("Service details: %v", service)
 
 		// ExternalName services are a special kind that return CNAME records
+		// 外部服务使用CNAME records
+		//也就是有clusterIP
 		if service.Spec.Type == kapi.ServiceTypeExternalName {
 			kd.newExternalNameService(service)
 			return
 		}
 		// if ClusterIP is not set, a DNS entry should not be created
+		// 如果没有clusterip创建headless service
 		if !kapi.IsServiceIPSet(service) {
 			kd.newHeadlessService(service)
 			return
@@ -288,6 +335,7 @@ func (kd *KubeDNS) newService(obj interface{}) {
 			glog.Warningf("Service with no ports, this should not have happened: %v",
 				service)
 		}
+		//详细看这个函数的实现
 		kd.newPortalService(service)
 	}
 }
@@ -370,8 +418,21 @@ func (kd *KubeDNS) fqdn(service *kapi.Service, subpaths ...string) string {
 }
 
 func (kd *KubeDNS) newPortalService(service *kapi.Service) {
+	// 创建一个treecache节点
+	// 以前的dns将数据存储在etcd中，treecache替换etcd存储service的数据结构
+	// 它是一个逆向存储service的是一个数据结构，
+	// 这个设计的原因是由于域名结构就是这样设计的，多级域名，后面是顶级域名，
+	// 前面可能是2级（如：www.baidu.com）、3级（www.hi.baidu.com）甚至更多级域名。
+	// 所以反过来存储能够更快的检索到域名。
+	// 通过fqdn返回完整域名FQDN，所以在末尾会多出一个点（.），
+	// 并且这是已经通过ReverseArray将域名颠倒
 	subCache := treecache.NewTreeCache()
+	// 创建一个service记录，结构是msg.Service，recordLabel是一个hash值
 	recordValue, recordLabel := util.GetSkyMsg(service.Spec.ClusterIP, 0)
+	// 使用fqdn，通过fqdn返回完整域名FQDN，所以在末尾会多出一个点（.）
+	// fqdn用于生成完整的服务域名，根据service和domainPath，“svc”等
+	// 在通过SetEntry创建entity
+	// 生成叶子节点
 	subCache.SetEntry(recordLabel, recordValue, kd.fqdn(service, recordLabel))
 
 	// Generate SRV Records
@@ -382,7 +443,7 @@ func (kd *KubeDNS) newPortalService(service *kapi.Service) {
 
 			l := []string{"_" + strings.ToLower(string(port.Protocol)), "_" + port.Name}
 			glog.V(2).Infof("Added SRV record %+v", srvValue)
-
+			//在通过SetEntry创建entity
 			subCache.SetEntry(recordLabel, srvValue, kd.fqdn(service, append(l, recordLabel)...), l...)
 		}
 	}
@@ -392,6 +453,7 @@ func (kd *KubeDNS) newPortalService(service *kapi.Service) {
 
 	kd.cacheLock.Lock()
 	defer kd.cacheLock.Unlock()
+	// 构建树
 	kd.cache.SetSubCache(service.Name, subCache, subCachePath...)
 	kd.reverseRecordMap[service.Spec.ClusterIP] = reverseRecord
 	kd.clusterIPServiceMap[service.Spec.ClusterIP] = service

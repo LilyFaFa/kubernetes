@@ -29,8 +29,17 @@ import (
 	"k8s.io/kubernetes/pkg/version/verflag"
 )
 
+//kubedns
+//监视k8s Service资源并更新DNS记录
+//替换etcd，使用TreeCache数据结构保存DNS记录并实现SkyDNS的Backend接口
+//接入SkyDNS，对dnsmasq提供DNS查询服务
+//dnsmasq
+//对集群提供DNS查询服务
+//设置kubedns为upstream
+//提供DNS缓存，降低kubedns负载，提高性能
 func main() {
 	config := options.NewKubeDNSConfig()
+	//然后再通过AddFlags制定用户自己的参数，当然会覆盖上面的默认参数，代码如下
 	config.AddFlags(pflag.CommandLine)
 
 	flag.InitFlags()
@@ -40,7 +49,8 @@ func main() {
 	verflag.PrintAndExitIfRequested()
 
 	glog.V(0).Infof("version: %+v", version.Get())
-
+	//创建服务，创建kubeDNS，并且创建service和endpoint的listwatch
 	server := app.NewKubeDNSServerDefault(config)
+	//启动服务
 	server.Run()
 }

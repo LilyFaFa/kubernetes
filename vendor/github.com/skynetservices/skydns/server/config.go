@@ -24,6 +24,7 @@ const (
 // Config provides options to the SkyDNS resolver.
 type Config struct {
 	// The ip:port SkyDNS should be listening on for incoming DNS requests.
+	//ip：port是DNS服务监听的主机和端口，监听DNS请求
 	DnsAddr string `json:"dns_addr,omitempty"`
 	// bind to port(s) activated by systemd. If set to true, this overrides DnsAddr.
 	Systemd bool `json:"systemd,omitempty"`

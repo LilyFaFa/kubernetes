@@ -97,6 +97,7 @@ func NewEndpointsConfig() *EndpointsConfig {
 func (c *EndpointsConfig) RegisterHandler(handler EndpointsConfigHandler) {
 	c.bcaster.Add(config.ListenerFunc(func(instance interface{}) {
 		glog.V(3).Infof("Calling handler.OnEndpointsUpdate()")
+		//看一下这个函数pkg/proxy/iptables/proxier.go--OnEndpointsUpdate
 		handler.OnEndpointsUpdate(instance.([]api.Endpoints))
 	}))
 }
@@ -190,6 +191,7 @@ type ServiceConfig struct {
 
 // NewServiceConfig creates a new ServiceConfig.
 // It immediately runs the created ServiceConfig.
+//创建一个ServiceConfig
 func NewServiceConfig() *ServiceConfig {
 	// The updates channel is used to send interrupts to the Services handler.
 	// It's buffered because we never want to block for as long as there is a
@@ -198,14 +200,21 @@ func NewServiceConfig() *ServiceConfig {
 	updates := make(chan struct{}, 1)
 	store := &serviceStore{updates: updates, services: make(map[string]map[types.NamespacedName]api.Service)}
 	mux := config.NewMux(store)
+	// 创建一个事件广播机制，对象有一个listeners的列表，是一个监听列表
+	// 通过Add函数加入listener
+	// 当有事件发生时通过Notify函数通知所有的listener
 	bcaster := config.NewBroadcaster()
+	// 看一下这个函数，就是在updates中有事件时就通知所有的listener，调用Notify函数
 	go watchForUpdates(bcaster, store, updates)
 	return &ServiceConfig{mux, bcaster, store}
 }
 
+//为broadCaster添加一个listener
 func (c *ServiceConfig) RegisterHandler(handler ServiceConfigHandler) {
 	c.bcaster.Add(config.ListenerFunc(func(instance interface{}) {
 		glog.V(3).Infof("Calling handler.OnServiceUpdate()")
+		//当有更新时的updates操作函数
+		//看一下这个函数pkg/proxy/iptables/proxier.go--OnServiceUpdate
 		handler.OnServiceUpdate(instance.([]api.Service))
 	}))
 }
@@ -232,6 +241,9 @@ type serviceStore struct {
 	updates     chan<- struct{}
 }
 
+// merge函数，用来合并生产者发送来的事件，并做处理。
+// 那么在这里就是对service的信息做处理，有add，remove，set等操作
+// 处理之后更新到s.updates
 func (s *serviceStore) Merge(source string, change interface{}) error {
 	s.serviceLock.Lock()
 	services := s.services[source]
@@ -265,6 +277,7 @@ func (s *serviceStore) Merge(source string, change interface{}) error {
 	}
 	s.services[source] = services
 	s.serviceLock.Unlock()
+	//在处理完之后，则发送消息给update
 	if s.updates != nil {
 		// Since we record the snapshot before sending this signal, it's
 		// possible that the consumer ends up performing an extra update.
@@ -292,6 +305,7 @@ func (s *serviceStore) MergedState() interface{} {
 // watchForUpdates invokes bcaster.Notify() with the latest version of an object
 // when changes occur.
 func watchForUpdates(bcaster *config.Broadcaster, accessor config.Accessor, updates <-chan struct{}) {
+	//创建一个for循环，查看updates中是否有事件写入
 	for true {
 		<-updates
 		bcaster.Notify(accessor.MergedState())

@@ -220,6 +220,7 @@ var _ proxy.ProxyProvider = &Proxier{}
 // An error will be returned if iptables fails to update or acquire the initial lock.
 // Once a proxier is created, it will keep iptables up to date in the background and
 // will not terminate if a particular iptables call fails.
+//
 func NewProxier(ipt utiliptables.Interface, sysctl utilsysctl.Interface, exec utilexec.Interface, syncPeriod time.Duration, minSyncPeriod time.Duration, masqueradeAll bool, masqueradeBit int, clusterCIDR string, hostname string, nodeIP net.IP) (*Proxier, error) {
 	// check valid user input
 	if minSyncPeriod > syncPeriod {
@@ -426,6 +427,9 @@ func (proxier *Proxier) SyncLoop() {
 
 // OnServiceUpdate tracks the active set of service proxies.
 // They will be synchronized using syncProxyRules()
+// 在service资源发生变化的时候做的操作
+// serviceConfig中间件监听apiserver对service资源的操作，
+// 那么例如在监听到apiserver创建service时会调用这个serviceupdates
 func (proxier *Proxier) OnServiceUpdate(allServices []api.Service) {
 	start := time.Now()
 	defer func() {
@@ -448,11 +452,12 @@ func (proxier *Proxier) OnServiceUpdate(allServices []api.Service) {
 		}
 
 		// if ClusterIP is "None" or empty, skip proxying
+		// 如果clusterIP是“None”空的，那么就跳过proxy设置
 		if !api.IsServiceIPSet(service) {
 			glog.V(3).Infof("Skipping service %s due to clusterIP = %q", svcName, service.Spec.ClusterIP)
 			continue
 		}
-
+		// 循环处理创建service时打开的端口
 		for i := range service.Spec.Ports {
 			servicePort := &service.Spec.Ports[i]
 
@@ -471,6 +476,7 @@ func (proxier *Proxier) OnServiceUpdate(allServices []api.Service) {
 				glog.V(3).Infof("Something changed for service %q: removing it", serviceName)
 				delete(proxier.serviceMap, serviceName)
 			}
+			//创建的servic的ClusterIP
 			serviceIP := net.ParseIP(service.Spec.ClusterIP)
 			glog.V(1).Infof("Adding new service %q at %s:%d/%s", serviceName, serviceIP, servicePort.Port, servicePort.Protocol)
 			info = newServiceInfo(serviceName)
@@ -501,6 +507,9 @@ func (proxier *Proxier) OnServiceUpdate(allServices []api.Service) {
 				// Delete healthcheck responders, if any, previously listening for this service
 				healthcheck.DeleteServiceListener(serviceName.NamespacedName, 0)
 			}
+			// 将service的clusterIP，port等信息写进一个结构体map中
+			// 一个service可以开多个主机端口？可以有多个clusterIP吗？
+			// 看代码是这样的
 			proxier.serviceMap[serviceName] = info
 
 			glog.V(4).Infof("added serviceInfo(%s): %s", serviceName, spew.Sdump(info))
@@ -509,7 +518,9 @@ func (proxier *Proxier) OnServiceUpdate(allServices []api.Service) {
 
 	staleUDPServices := sets.NewString()
 	// Remove serviceports missing from the update.
+	// 处理上文整理的servcie信息
 	for name, info := range proxier.serviceMap {
+		// 如果service已经不存活，则不处理，从proxier.serviceMap移出
 		if !activeServices[name] {
 			glog.V(1).Infof("Removing service %q", name)
 			if info.protocol == api.ProtocolUDP {
@@ -529,6 +540,9 @@ func (proxier *Proxier) OnServiceUpdate(allServices []api.Service) {
 			}
 		}
 	}
+	// 设置iptables的地方
+	// 主要的动作就是更具service信息和endpoint信息，配置IPtables规则，设置相应的路由。
+	// 具体IPtables怎么配置感兴趣的可以去了解下，相关网络的配置。
 	proxier.syncProxyRules()
 	proxier.deleteServiceConnections(staleUDPServices.List())
 
@@ -682,6 +696,9 @@ func (proxier *Proxier) OnEndpointsUpdate(allEndpoints []api.Endpoints) {
 
 	if len(newEndpointsMap) != len(proxier.endpointsMap) || !reflect.DeepEqual(newEndpointsMap, proxier.endpointsMap) {
 		proxier.endpointsMap = newEndpointsMap
+		// 也调用了创建iptables的函数
+		// 主要的动作就是更具service信息和endpoint信息，
+		// 配置IPtables规则，设置相应的路由。
 		proxier.syncProxyRules()
 	} else {
 		glog.V(4).Infof("Skipping proxy iptables rule sync on endpoint update because nothing changed")
@@ -827,6 +844,8 @@ func (proxier *Proxier) execConntrackTool(parameters ...string) error {
 // This is where all of the iptables-save/restore calls happen.
 // The only other iptables rules are those that are setup in iptablesInit()
 // assumes proxier.mu is held
+// 设置iptables，iptablesMode有一个轮询负载均衡可以看一下
+// 就是通过service实现对pod的平均流量转发
 func (proxier *Proxier) syncProxyRules() {
 	if proxier.throttle != nil {
 		proxier.throttle.Accept()
@@ -843,6 +862,11 @@ func (proxier *Proxier) syncProxyRules() {
 	glog.V(3).Infof("Syncing iptables rules")
 
 	// Create and link the kube services chain.
+	// 创建kube services chain
+	// 首先是建立filter表的INPUT/OUTPUT和nat表的OUTPUT/PREROUTE规则全部跳转到service链
+	// -A OUTPUT -m comment --comment "kubernetes service portals" -j KUBE-SERVICES
+	// -A PREROUTING -m comment --comment "kubernetes service portals" -j KUBE-SERVICES
+	// -A OUTPUT -m comment --comment "kubernetes service portals" -j KUBE-SERVICES
 	{
 		tablesNeedServicesChain := []utiliptables.Table{utiliptables.TableFilter, utiliptables.TableNAT}
 		for _, table := range tablesNeedServicesChain {
@@ -871,6 +895,9 @@ func (proxier *Proxier) syncProxyRules() {
 	}
 
 	// Create and link the kube postrouting chain.
+	// 处理流量需要通过SNAT出去,设置跳转到KUBE-POSTROUTING
+	//-A POSTROUTING -m comment --comment "kubernetes postrouting rules" -j KUBE-POSTROUTING
+	//-A KUBE-POSTROUTING -m comment --comment "kubernetes service traffic requiring SNAT" -m mark --mark 0x4000/0x4000 -j MASQUERADE
 	{
 		if _, err := proxier.iptables.EnsureChain(utiliptables.TableNAT, kubePostroutingChain); err != nil {
 			glog.Errorf("Failed to ensure that %s chain %s exists: %v", utiliptables.TableNAT, kubePostroutingChain, err)
@@ -909,11 +936,13 @@ func (proxier *Proxier) syncProxyRules() {
 	natRules := bytes.NewBuffer(nil)
 
 	// Write table headers.
+	//现在开始建立kubernetes proxy的各个链
 	writeLine(filterChains, "*filter")
 	writeLine(natChains, "*nat")
 
 	// Make sure we keep stats for the top-level chains, if they existed
 	// (which most should have because we created them above).
+	// 这个里面创建KUBE-SERVICES、KUBE-NODEPORTS、KUBE-POSTROUTING、KUBE-MARK-MASQ
 	if chain, ok := existingFilterChains[kubeServicesChain]; ok {
 		writeLine(filterChains, chain)
 	} else {
@@ -993,6 +1022,7 @@ func (proxier *Proxier) syncProxyRules() {
 		}
 
 		// Capture the clusterIP.
+		// 截获clusterIP的流量做DNAT
 		args := []string{
 			"-A", string(kubeServicesChain),
 			"-m", "comment", "--comment", fmt.Sprintf(`"%s cluster IP"`, svcName.String()),
@@ -1059,6 +1089,7 @@ func (proxier *Proxier) syncProxyRules() {
 		}
 
 		// Capture load-balancer ingress.
+		// ingress这个还没看，先跳过
 		for _, ingress := range svcInfo.loadBalancerStatus.Ingress {
 			if ingress.IP != "" {
 				// create service firewall chain
@@ -1213,6 +1244,13 @@ func (proxier *Proxier) syncProxyRules() {
 
 		// Now write loadbalancing & DNAT rules.
 		n := len(endpointChains)
+		// 有多个endpoint的时候进行负载均衡
+		// 上面通过循环的方式创建后端endpoint的转发，
+		// 概率是通过probability后的1.0/float64(n-i)计算出来的，
+		// 譬如有两个的场景，那么将会是一个0.5和1也就是第一个是50%概率第二个是100%概率，
+		// 如果是三个的话类似，33%、50%、100%。
+		// 10个的话就是1／10，1／9，1／8，1／7，1／6，1／5.......
+		// 这样算起来每个endpoint的概率都是1/10, 第2个：9／10*1／9=1／10
 		for i, endpointChain := range endpointChains {
 			// Balancing rules in the per-service chain.
 			args := []string{

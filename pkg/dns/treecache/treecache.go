@@ -52,6 +52,13 @@ type TreeCache interface {
 	Serialize() (string, error)
 }
 
+//treeCache数据结构
+//如下图所示，TreeCache的结构类似于目录树。
+//从根节点到叶子节点的每个路径与一个域名是相对应的，顺序是颠倒的。
+//它的叶子节点只包含Entries，非叶子节点只包含ChildNodes。
+//叶子节点中保存的就是SkyDNS定义的msg.Service结构，可以理解为DNS记录。
+
+//在Records接口方法实现中，只需根据域名查找到对应的叶子节点，并返回叶子节点中保存的所有msg.Service数据。K8S就是通过这样的一个数据结构来保存DNS记录的，并替换了Etcd。
 type treeCache struct {
 	ChildNodes map[string]*treeCache
 	Entries    map[string]interface{}
@@ -59,6 +66,7 @@ type treeCache struct {
 
 func NewTreeCache() TreeCache {
 	return &treeCache{
+		// 子节点
 		ChildNodes: make(map[string]*treeCache),
 		Entries:    make(map[string]interface{}),
 	}

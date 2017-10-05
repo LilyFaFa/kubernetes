@@ -61,7 +61,9 @@ func ReverseArray(arr []string) []string {
 // Returns record in a format that SkyDNS understands.
 // Also return the hash of the record.
 func GetSkyMsg(ip string, port int) (*msg.Service, string) {
+	//新建一个service记录
 	msg := NewServiceRecord(ip, port)
+	//记录hash
 	hash := HashServiceRecord(msg)
 	glog.V(5).Infof("Constructed new DNS record: %s, hash:%s",
 		fmt.Sprintf("%v", msg), hash)

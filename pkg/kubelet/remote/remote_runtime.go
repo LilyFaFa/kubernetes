@@ -44,9 +44,10 @@ func NewRemoteRuntimeService(addr string, connectionTimout time.Duration) (inter
 		glog.Errorf("Connect remote runtime %s failed: %v", addr, err)
 		return nil, err
 	}
-
+	//runtimeClient
 	return &RemoteRuntimeService{
-		timeout:       connectionTimout,
+		timeout: connectionTimout,
+		//创建runtimeClient
 		runtimeClient: runtimeApi.NewRuntimeServiceClient(conn),
 	}, nil
 }

@@ -75,14 +75,17 @@ func (m *Mux) Channel(source string) chan interface{} {
 		return channel
 	}
 	newChannel := make(chan interface{})
+	//添加一个source并且为其维护一个channel
 	m.sources[source] = newChannel
+	//监听channel
 	go wait.Until(func() { m.listen(source, newChannel) }, 0, wait.NeverStop)
 	return newChannel
 }
 
 func (m *Mux) listen(source string, listenChannel <-chan interface{}) {
+	//监听channel
 	for update := range listenChannel {
-		//调用Merge
+		//调用Merge，将监听到的消息个给updates
 		m.merger.Merge(source, update)
 	}
 }
