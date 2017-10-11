@@ -81,6 +81,7 @@ func main() {
 	}
 
 	// construct a KubeletServer from kubeletFlags and kubeletConfig
+	// 构建kubeletServer
 	kubeletServer := &options.KubeletServer{
 		KubeletFlags:         *kubeletFlags,
 		KubeletConfiguration: *kubeletConfig,
