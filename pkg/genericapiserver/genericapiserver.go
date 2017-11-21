@@ -47,20 +47,34 @@ import (
 )
 
 // Info about an API group.
+// API group的信息
 type APIGroupInfo struct {
+	// 该group的元数据信息
+	// 主要包括Group的元信息，里面的成员RESTMapper，
+	// 与APIGroupVersion一样，其实APIGroupVersion的RESTMapper直接取之于GroupMeta的RESTMapper.
+	// 一个Group可能包含多个版本，存储在GroupVersion中，而GroupVersion是默认存储在etcd中的版本
 	GroupMeta apimachinery.GroupMeta
 	// Info about the resources in this group. Its a map from version to resource to the storage.
+	// 版本信息，version-resource-storage，各个版本的各个资源的storage的map
 	VersionedResourcesStorageMap map[string]map[string]rest.Storage
 	// OptionsExternalVersion controls the APIVersion used for common objects in the
 	// schema like api.Status, api.DeleteOptions, and api.ListOptions. Other implementors may
 	// define a version "v1beta1" but want to use the Kubernetes "v1" internal objects.
 	// If nil, defaults to groupMeta.GroupVersion.
 	// TODO: Remove this when https://github.com/kubernetes/kubernetes/issues/19018 is fixed.
+	// type GroupVersion struct {
+	//	Group   string `protobuf:"bytes,1,opt,name=group"`
+	//	Version string `protobuf:"bytes,2,opt,name=version"`
+	// }
 	OptionsExternalVersion *unversioned.GroupVersion
 
 	// Scheme includes all of the types used by this group and how to convert between them (or
 	// to convert objects from outside of this group that are accepted in this API).
 	// TODO: replace with interfaces
+	// core group的话，对应的就是api.Scheme
+	// Scheme: 用于API资源之间的序列化、反序列化、版本转换。
+	// Scheme里面还有好几个map，前面的结构体存储的都是unversioned.GroupVersionKind、unversioned.GroupVersion这些东西，
+	// 这些东西本质上只是表示资源的字符串标识，Scheme存储了对应着标志的具体的API资源的结构体，即relect.Type
 	Scheme *runtime.Scheme
 	// NegotiatedSerializer controls how this group encodes and decodes data
 	NegotiatedSerializer runtime.NegotiatedSerializer
@@ -71,6 +85,12 @@ type APIGroupInfo struct {
 	// accessible from this API group version. The GroupVersionKind is that of the external version of
 	// the subresource. The key of this map should be the path of the subresource. The keys here should
 	// match the keys in the Storage map above for subresources.
+	// 所有resources信息,key就是resource的path
+	// type GroupVersionKind struct {
+	//    Group   string `protobuf:"bytes,1,opt,name=group"`
+	//    Version string `protobuf:"bytes,2,opt,name=version"`
+	//    Kind    string `protobuf:"bytes,3,opt,name=kind"`
+	// }
 	SubresourceGroupVersionKind map[string]unversioned.GroupVersionKind
 }
 
@@ -214,6 +234,7 @@ func (s preparedGenericAPIServer) Run(stopCh <-chan struct{}) {
 
 // installAPIResources is a private method for installing the REST storage backing each api groupversionresource
 func (s *GenericAPIServer) installAPIResources(apiPrefix string, apiGroupInfo *APIGroupInfo) error {
+	// 遍历该group支持的version
 	for _, groupVersion := range apiGroupInfo.GroupMeta.GroupVersions {
 		apiGroupVersion, err := s.getAPIGroupVersion(apiGroupInfo, groupVersion, apiPrefix)
 		if err != nil {
@@ -222,7 +243,9 @@ func (s *GenericAPIServer) installAPIResources(apiPrefix string, apiGroupInfo *A
 		if apiGroupInfo.OptionsExternalVersion != nil {
 			apiGroupVersion.OptionsExternalVersion = apiGroupInfo.OptionsExternalVersion
 		}
-
+		// 对该group version的资源进行注册
+		// The registered APIs ==== HandlerContainer *genericmux.APIContainer
+		// 看一下这个函数
 		if err := apiGroupVersion.InstallREST(s.HandlerContainer.Container); err != nil {
 			return fmt.Errorf("Unable to setup API %v: %v", apiGroupInfo, err)
 		}
@@ -235,6 +258,7 @@ func (s *GenericAPIServer) InstallLegacyAPIGroup(apiPrefix string, apiGroupInfo 
 	if !s.legacyAPIGroupPrefixes.Has(apiPrefix) {
 		return fmt.Errorf("%q is not in the allowed legacy API prefixes: %v", apiPrefix, s.legacyAPIGroupPrefixes.List())
 	}
+	//看一下这个函数，这个是注册资源的过程
 	if err := s.installAPIResources(apiPrefix, apiGroupInfo); err != nil {
 		return err
 	}
@@ -259,16 +283,20 @@ func (s *GenericAPIServer) InstallLegacyAPIGroup(apiPrefix string, apiGroupInfo 
 }
 
 // Exposes the given api group in the API.
+// 这个函数是在某一个for循环中的，每一次循环都会对一个 APIGroupInfo 进行注册
 func (s *GenericAPIServer) InstallAPIGroup(apiGroupInfo *APIGroupInfo) error {
 	// Do not register empty group or empty version.  Doing so claims /apis/ for the wrong entity to be returned.
 	// Catching these here places the error  much closer to its origin
+	// 判断该group的名字是否是空
 	if len(apiGroupInfo.GroupMeta.GroupVersion.Group) == 0 {
 		return fmt.Errorf("cannot register handler with an empty group for %#v", *apiGroupInfo)
 	}
+	// 判断该group的默认version是否是空
 	if len(apiGroupInfo.GroupMeta.GroupVersion.Version) == 0 {
 		return fmt.Errorf("cannot register handler with an empty version for %#v", *apiGroupInfo)
 	}
-
+	// 定义的APIGroupPrefix = "/apis"，这里为什么只有apis一个呢？不知道
+	// 看一下这里的installAPIResources资源注册函数
 	if err := s.installAPIResources(APIGroupPrefix, apiGroupInfo); err != nil {
 		return err
 	}
@@ -328,6 +356,7 @@ func (s *GenericAPIServer) getAPIGroupVersion(apiGroupInfo *APIGroupInfo, groupV
 	return version, err
 }
 
+//创建一个APIGroupVersion，需要APIGroupInfo、 apiGroupInfo.Scheme、apiGroupInfo.GroupMeta参数
 func (s *GenericAPIServer) newAPIGroupVersion(apiGroupInfo *APIGroupInfo, groupVersion unversioned.GroupVersion) (*apiserver.APIGroupVersion, error) {
 	return &apiserver.APIGroupVersion{
 		GroupVersion: groupVersion,

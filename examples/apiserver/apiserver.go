@@ -78,7 +78,8 @@ func Run(serverOptions *genericoptions.ServerRunOptions, stopCh <-chan struct{})
 	if err != nil {
 		return fmt.Errorf("Error in bringing up the server: %v", err)
 	}
-
+	// var SchemeGroupVersion = unversioned.GroupVersion{Group: "", Version: "v1"}
+	// GroupVersoin这个结构体就和它的名字一样包含着group和version两个变量
 	groupVersion := v1.SchemeGroupVersion
 	groupName := groupVersion.Group
 	groupMeta, err := registered.Group(groupName)
@@ -94,6 +95,7 @@ func Run(serverOptions *genericoptions.ServerRunOptions, stopCh <-chan struct{})
 	restStorageMap := map[string]rest.Storage{
 		"testtypes": testgroupetcd.NewREST(storageConfig, generic.UndecoratedStorage),
 	}
+	// 在资源对象注册的时候，APIGroupInfo：是在同一个Group下的所有资源的集合，是对一个group的描述
 	apiGroupInfo := genericapiserver.APIGroupInfo{
 		GroupMeta: *groupMeta,
 		VersionedResourcesStorageMap: map[string]map[string]rest.Storage{

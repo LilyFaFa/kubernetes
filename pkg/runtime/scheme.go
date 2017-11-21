@@ -166,6 +166,9 @@ func (s *Scheme) AddKnownTypes(gv unversioned.GroupVersion, types ...Object) {
 	if len(gv.Version) == 0 {
 		panic(fmt.Sprintf("version is required on all types: %s %v", gv, types[0]))
 	}
+	// 该接口主要操作了s.gvkToType和s.typeToGVK，用于转换的目的。
+	// 综上得出，是将internal version添加到Scheme中。
+	// 为什么会有一个internal version呢？ 其实每一个Group都有一个internal version。而apiserver操作的也都是internal version.
 	for _, obj := range types {
 		t := reflect.TypeOf(obj)
 		if t.Kind() != reflect.Ptr {

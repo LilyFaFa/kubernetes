@@ -200,7 +200,7 @@ func (c completedConfig) New() (*Master, error) {
 	if reflect.DeepEqual(c.KubeletClientConfig, kubeletclient.KubeletClientConfig{}) {
 		return nil, fmt.Errorf("Master.New() called with empty config.KubeletClientConfig")
 	}
-
+	//这个New函数也是比较重要可以看一下
 	s, err := c.Config.GenericConfig.SkipComplete().New() // completion is done in Complete, no need for a second time
 	if err != nil {
 		return nil, err
@@ -218,11 +218,18 @@ func (c completedConfig) New() (*Master, error) {
 	}
 
 	restOptionsFactory := restOptionsFactory{
+		//最大的删除资源的携程数
 		deleteCollectionWorkers: c.DeleteCollectionWorkers,
+		//是否使能GC
 		enableGarbageCollection: c.GenericConfig.EnableGarbageCollection,
 		storageFactory:          c.StorageFactory,
 	}
-
+	// 判断是否使能了用于Watch的Cache
+	// 有无cache赋值的是不同的接口实现
+	// restOptionsFactory.storageDecorator ：是一个各个资源的REST interface(CRUD)装饰者
+	// 后面调用NewStorage()时会用到该接口，并输出对应的CRUD接口及销毁接口。
+	// 可以参考pkg/registry/core/pod/etcd/etcd.go中的NewStorage()
+	// 其实这里有无cache的接口差异就在于：有cache的话，就提供操作cache的接口；无cache的话，就提供直接操作etcd的接口
 	if c.EnableWatchCache {
 		restOptionsFactory.storageDecorator = registry.StorageWithCacher
 	} else {
@@ -230,6 +237,7 @@ func (c completedConfig) New() (*Master, error) {
 	}
 
 	// install legacy rest storage
+	// /api这个资源的注册
 	if c.GenericConfig.APIResourceConfigSource.AnyResourcesForVersionEnabled(apiv1.SchemeGroupVersion) {
 		legacyRESTStorageProvider := corerest.LegacyRESTStorageProvider{
 			StorageFactory:       c.StorageFactory,
@@ -240,9 +248,10 @@ func (c completedConfig) New() (*Master, error) {
 			ServiceNodePortRange: c.ServiceNodePortRange,
 			LoopbackClientConfig: c.GenericConfig.LoopbackClientConfig,
 		}
+		//restOptionsFactory.NewFor接口一直被往下传，直到NewLegacyRESTStorage()接口中被调用然后创建了opts，
 		m.InstallLegacyAPI(c.Config, restOptionsFactory.NewFor, legacyRESTStorageProvider)
 	}
-
+	// /apis这个资源的注册
 	restStorageProviders := []genericapiserver.RESTStorageProvider{
 		appsrest.RESTStorageProvider{},
 		authenticationrest.RESTStorageProvider{Authenticator: c.GenericConfig.Authenticator},
@@ -264,7 +273,9 @@ func (c completedConfig) New() (*Master, error) {
 	return m, nil
 }
 
+// /api资源的注册
 func (m *Master) InstallLegacyAPI(c *Config, restOptionsGetter genericapiserver.RESTOptionsGetter, legacyRESTStorageProvider corerest.LegacyRESTStorageProvider) {
+	// 这个地方是向etcd 建立注册资源关系，创建storage，需要看一下
 	legacyRESTStorage, apiGroupInfo, err := legacyRESTStorageProvider.NewLegacyRESTStorage(restOptionsGetter)
 	if err != nil {
 		glog.Fatalf("Error building core storage: %v", err)
@@ -277,7 +288,7 @@ func (m *Master) InstallLegacyAPI(c *Config, restOptionsGetter genericapiserver.
 			glog.Fatalf("Error registering PostStartHook %q: %v", "bootstrap-controller", err)
 		}
 	}
-
+	// 这个是install函数，用于注册core group的资源
 	if err := m.GenericAPIServer.InstallLegacyAPIGroup(genericapiserver.DefaultLegacyAPIPrefix, &apiGroupInfo); err != nil {
 		glog.Fatalf("Error in registering group versions: %v", err)
 	}
@@ -296,19 +307,26 @@ func (m *Master) installTunneler(tunneler genericapiserver.Tunneler, nodeClient 
 func (m *Master) InstallAPIs(apiResourceConfigSource genericapiserver.APIResourceConfigSource, restOptionsGetter genericapiserver.RESTOptionsGetter, restStorageProviders ...genericapiserver.RESTStorageProvider) {
 	apiGroupsInfo := []genericapiserver.APIGroupInfo{}
 
+	// for循环便利restStorageProviders，虽然还是不是很清楚这个的作用
+	// 但应该是在循环建立支持的Group
 	for _, restStorageBuilder := range restStorageProviders {
+		// restStorageBuilder应该是实现了某个接口。
 		groupName := restStorageBuilder.GroupName()
+		// apiResourceConfigSource应该是陈列了一些支持的group，如果在该集合中的应该是一些
+		// enabled API,所以这里判断一下这个group是否需要跳过不进行注册
 		if !apiResourceConfigSource.AnyResourcesForGroupEnabled(groupName) {
 			glog.V(1).Infof("Skipping disabled API group %q.", groupName)
 			continue
 		}
+		// 创建一个该group的apiGroupInfo，groupInfo是对这个group的描述，包含其所有的资源
+		// 同时创建了资源的Storage，storage都在变量 apiGroupInfo 中
 		apiGroupInfo, enabled := restStorageBuilder.NewRESTStorage(apiResourceConfigSource, restOptionsGetter)
 		if !enabled {
 			glog.Warningf("Problem initializing API group %q, skipping.", groupName)
 			continue
 		}
 		glog.V(1).Infof("Enabling API group %q.", groupName)
-
+		//这个看不太懂，Hook的作用是啥？
 		if postHookProvider, ok := restStorageBuilder.(genericapiserver.PostStartHookProvider); ok {
 			name, hook, err := postHookProvider.PostStartHook()
 			if err != nil {
@@ -321,7 +339,7 @@ func (m *Master) InstallAPIs(apiResourceConfigSource genericapiserver.APIResourc
 
 		apiGroupsInfo = append(apiGroupsInfo, apiGroupInfo)
 	}
-
+	//过滤之后是支持的groupInfo，然后开始一一注册的过程，看一下这个注册的过程
 	for i := range apiGroupsInfo {
 		if err := m.GenericAPIServer.InstallAPIGroup(&apiGroupsInfo[i]); err != nil {
 			glog.Fatalf("Error in registering group versions: %v", err)
@@ -330,18 +348,28 @@ func (m *Master) InstallAPIs(apiResourceConfigSource genericapiserver.APIResourc
 }
 
 type restOptionsFactory struct {
+	// 最大回收资源的协程数目
 	deleteCollectionWorkers int
+	// 是否使能GC
 	enableGarbageCollection bool
-	storageFactory          genericapiserver.StorageFactory
-	storageDecorator        generic.StorageDecorator
+	// StorageFactory
+	storageFactory   genericapiserver.StorageFactory
+	storageDecorator generic.StorageDecorator
 }
 
 func (f restOptionsFactory) NewFor(resource unversioned.GroupResource) generic.RESTOptions {
+	// 创建该资源的Storage Config
 	storageConfig, err := f.storageFactory.NewConfig(resource)
 	if err != nil {
 		glog.Fatalf("Unable to find storage destination for %v, due to %v", resource, err.Error())
 	}
-
+	// 最终返回的就是RESTOptions, 就是前面的opts的类型
+	// 需要关注f.storageDecorator的由来
+	// 该接口比较简单，初始化了一个generic.RESTOptions变量，即opts。我们需要找出opts.Decorator的由来,就只需要看下上一个接口判断EnableWatchCache时就明白了。
+	// opts.Decorator该接口最终返回了storage的interface和清除操作资源的接口。可以想一下带缓冲和不带缓冲的接口实现肯定不一致，所以这里需要进行区分:
+	// - registry.StorageWithCacher：该接口是返回了操作cache的接口，和清除cache的操作接口
+	// - generic.UndecoratedStorage: 该接口会根据你配置的后端类型(etcd2/etcd3等)，来返回不同的etcd操作接口，其实是为所有的资源对象创建了etcd的链接，然后通过该链接发送不同的命令，最后还返回了断开该链接的接口。
+	// 所以实现完全不一样，一个操作cache，一个操作实际的etcd。
 	return generic.RESTOptions{
 		StorageConfig:           storageConfig,
 		Decorator:               f.storageDecorator,

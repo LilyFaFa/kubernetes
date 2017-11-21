@@ -582,6 +582,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *api.Pod, _ api.PodStatus, podSt
 		if podContainerChanges.SandboxID != "" {
 			m.recorder.Eventf(ref, api.EventTypeNormal, "SandboxChanged", "Pod sandbox changed, it will be killed and re-created.")
 		} else {
+			//将创建写进事件机制中
 			m.recorder.Eventf(ref, api.EventTypeNormal, "SandboxReceived", "Pod sandbox received, it will be created.")
 		}
 
@@ -644,6 +645,8 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *api.Pod, _ api.PodStatus, podSt
 		glog.V(4).Infof("Creating sandbox for pod %q", format.Pod(pod))
 		createSandboxResult := kubecontainer.NewSyncResult(kubecontainer.CreatePodSandbox, format.Pod(pod))
 		result.AddSyncResult(createSandboxResult)
+		//创建sandbox，sanbox中需要首先创建一个容器，网络是挂载这个基础容器中的
+		//看一下这个(r *RemoteRuntimeService) RunPodSandbox
 		podSandboxID, msg, err = m.createPodSandbox(pod, podContainerChanges.Attempt)
 		if err != nil {
 			createSandboxResult.Fail(kubecontainer.ErrCreatePodSandbox, msg)

@@ -34,8 +34,10 @@ type APIContainer struct {
 }
 
 // NewAPIContainer constructs a new container for APIs
+// 创建一个container，apiserver的web框架是go-restful框架
 func NewAPIContainer(mux *http.ServeMux, s runtime.NegotiatedSerializer) *APIContainer {
 	c := APIContainer{
+		//调用restful创建一个container
 		Container: restful.NewContainer(),
 		NonSwaggerRoutes: PathRecorderMux{
 			mux: mux,

@@ -27,6 +27,7 @@ import (
 // extensions group instead. This Scheme is special and should appear ONLY in
 // the api group, unless you really know what you're doing.
 // TODO(lavalamp): make the above error impossible.
+// 创建scheme，看一下
 var Scheme = runtime.NewScheme()
 
 // Codecs provides access to encoding and decoding for the scheme
@@ -78,6 +79,9 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 	if err := scheme.AddIgnoredConversionType(&unversioned.TypeMeta{}, &unversioned.TypeMeta{}); err != nil {
 		return err
 	}
+	// 把下列对象加入到Scheme中
+	// 该SchemeGroupVersion的GroupName为空，Version是"__internal"
+	// 所以该接口其实是把k8s内置的version添加到Scheme，而且每个group都有该步
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&Pod{},
 		&PodList{},
@@ -127,6 +131,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 	)
 
 	// Register Unversioned types under their own special group
+
+	// 在GroupName为空，Version为"v1"的groupVersion中，添加这些对象到Scheme
 	scheme.AddUnversionedTypes(Unversioned,
 		&unversioned.ExportOptions{},
 		&unversioned.Status{},

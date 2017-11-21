@@ -258,6 +258,7 @@ func (rs *REST) List(ctx api.Context, options *api.ListOptions) (runtime.Object,
 
 // Watch returns Services events via a watch.Interface.
 // It implements rest.Watcher.
+// 实现kubernetes/pkg/api/rest/rest.go的Watch接口
 func (rs *REST) Watch(ctx api.Context, options *api.ListOptions) (watch.Interface, error) {
 	return rs.registry.WatchServices(ctx, options)
 }

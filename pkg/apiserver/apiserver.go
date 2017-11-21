@@ -62,12 +62,21 @@ type APIResourceLister interface {
 // /${storage_key}[/${object_name}]
 // Where 'storage_key' points to a rest.Storage object stored in storage.
 // This object should contain all parameterization necessary for running a particular API version
+// 对API资源的组织，里面包含了Storage、GroupVersion、Mapper、Serializer、Convertor等成员。
+// Storage 是etcd的接口，这是一个map类型，每一种资源都会与etcd建立一个连接；
+// GroupVersion 表示该APIGroupVersion属于哪个Group、哪个version；
+// Serializer 用于序列化，反序列化；
+// Convertor 提供各个不同版本进行转化的接口；
+// Mapper 实现了RESTMapper接口。
 type APIGroupVersion struct {
+	// key存在对象的url，value是一个rest.Storage，
+	// value用于对接etcd存储,该接口就是一个通用的符合Restful要求的资源存储接口。
 	Storage map[string]rest.Storage
-
+	// 该group的prefix，例如核心组的Root是'/api'
 	Root string
 
 	// GroupVersion is the external group version
+	// 包含类似'api/v1'这样的string，用于标识这个实例
 	GroupVersion unversioned.GroupVersion
 
 	// OptionsExternalVersion controls the Kubernetes APIVersion used for common objects in the apiserver
@@ -130,14 +139,20 @@ var _ APIResourceLister = &staticLister{}
 // It is expected that the provided path root prefix will serve all operations. Root MUST NOT end
 // in a slash.
 func (g *APIGroupVersion) InstallREST(container *restful.Container) error {
+	// 创建一个installer
 	installer := g.newInstaller()
+	// 创建一个webservice
+	// WebService逻辑上是Route的集合，功能上主要是为一组Route统一设置包括root path,请求响应的数据类型等一些通用的属性。
+	// 需要注意的是，WebService必须加入到Container中才能生效。
 	ws := installer.NewWebService()
+	// 对这个webservice进行注册，看一下这个Install函数
 	apiResources, registrationErrors := installer.Install(ws)
 	lister := g.ResourceLister
 	if lister == nil {
 		lister = staticLister{apiResources}
 	}
 	AddSupportedResourcesWebService(g.Serializer, ws, g.GroupVersion, lister)
+	// 将ws加入contianer中生效
 	container.Add(ws)
 	return utilerrors.NewAggregate(registrationErrors)
 }

@@ -32,6 +32,7 @@ import (
 )
 
 var (
+	// 通过NewOrDie初始化APIRegistrationManager
 	DefaultAPIRegistrationManager = NewOrDie(os.Getenv("KUBE_API_VERSIONS"))
 )
 
@@ -45,18 +46,23 @@ var (
 // isn't easy right now because there are so many callers of this package.
 type APIRegistrationManager struct {
 	// registeredGroupVersions stores all API group versions for which RegisterGroup is called.
+	// 所有已经registered的GroupVersions
 	registeredVersions map[unversioned.GroupVersion]struct{}
 
 	// thirdPartyGroupVersions are API versions which are dynamically
 	// registered (and unregistered) via API calls to the apiserver
+	// 第三方注册的GroupVersions,这些都向apiServer动态注册的
 	thirdPartyGroupVersions []unversioned.GroupVersion
 
 	// enabledVersions represents all enabled API versions. It should be a
 	// subset of registeredVersions. Please call EnableVersions() to add
 	// enabled versions.
+	// 所有已经enable的GroupVersions，可以通过EnableVersions()将要enable的GroupVersion加入进来。
+	// 只有enable了，才能使用对应的GroupVersion
 	enabledVersions map[unversioned.GroupVersion]struct{}
 
 	// map of group meta for all groups.
+	// 所有groups的GroupMeta
 	groupMetaMap map[string]*apimachinery.GroupMeta
 
 	// envRequestedVersions represents the versions requested via the
@@ -69,15 +75,22 @@ type APIRegistrationManager struct {
 // NewAPIRegistrationManager constructs a new manager. The argument ought to be
 // the value of the KUBE_API_VERSIONS env var, or a value of this which you
 // wish to test.
+// 创建一个APIRegistrationManager
+// 如果环境变量KUBE_API_VERSIONS进行了设置的话，进行遍历
 func NewAPIRegistrationManager(kubeAPIVersions string) (*APIRegistrationManager, error) {
 	m := &APIRegistrationManager{
-		registeredVersions:      map[unversioned.GroupVersion]struct{}{},
+		// 所以已经registered的GroupVersions
+		registeredVersions: map[unversioned.GroupVersion]struct{}{},
+		// 第三方注册的GroupVersions,这些都向apiServer动态注册的
 		thirdPartyGroupVersions: []unversioned.GroupVersion{},
-		enabledVersions:         map[unversioned.GroupVersion]struct{}{},
-		groupMetaMap:            map[string]*apimachinery.GroupMeta{},
-		envRequestedVersions:    []unversioned.GroupVersion{},
+		// 所有已经enable的GroupVersions，可以通过EnableVersions()将要enable的GroupVersion加入进来。
+		// 只有enable了，才能使用对应的GroupVersion
+		enabledVersions: map[unversioned.GroupVersion]struct{}{},
+		groupMetaMap:    map[string]*apimachinery.GroupMeta{},
+		// 跟环境变量'KUBE_API_VERSIONS'有关
+		envRequestedVersions: []unversioned.GroupVersion{},
 	}
-
+	// 如果环境变量KUBE_API_VERSIONS进行了设置的话，进行遍历
 	if len(kubeAPIVersions) != 0 {
 		for _, version := range strings.Split(kubeAPIVersions, ",") {
 			gv, err := unversioned.ParseGroupVersion(version)
@@ -100,6 +113,7 @@ func NewOrDie(kubeAPIVersions string) *APIRegistrationManager {
 }
 
 // People are calling global functions. Let them continue to do that (for now).
+// DefaultAPIRegistrationManager的变量
 var (
 	ValidateEnvRequestedVersions  = DefaultAPIRegistrationManager.ValidateEnvRequestedVersions
 	AllPreferredGroupVersions     = DefaultAPIRegistrationManager.AllPreferredGroupVersions
@@ -129,6 +143,7 @@ func (m *APIRegistrationManager) RegisterVersions(availableVersions []unversione
 }
 
 // RegisterGroup adds the given group to the list of registered groups.
+// 注册给定的group
 func (m *APIRegistrationManager) RegisterGroup(groupMeta apimachinery.GroupMeta) error {
 	groupName := groupMeta.GroupVersion.Group
 	if _, found := m.groupMetaMap[groupName]; found {
@@ -378,12 +393,16 @@ func (m *APIRegistrationManager) prioritiesForGroups(groups ...string) ([]unvers
 
 // AllPreferredGroupVersions returns the preferred versions of all registered
 // groups in the form of "group1/version1,group2/version2,..."
+// 如果没有注册groupMeta的话，这里就==0
+// 不过不可能没有注册，至于在哪里进行注册就得看下后面介绍的GroupMeta初始化了
 func (m *APIRegistrationManager) AllPreferredGroupVersions() string {
 	if len(m.groupMetaMap) == 0 {
 		return ""
 	}
 	var defaults []string
 	for _, groupMeta := range m.groupMetaMap {
+		// 就是从m.groupMetaMap中取出所有的groupMeta，
+		// 然后通过逗号拼接成"group1/version1,group2/version2,..."的字符串。
 		defaults = append(defaults, groupMeta.GroupVersion.String())
 	}
 	sort.Strings(defaults)

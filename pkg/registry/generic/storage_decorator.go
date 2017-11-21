@@ -27,6 +27,7 @@ import (
 
 // StorageDecorator is a function signature for producing
 // a storage.Interface from given parameters.
+// 资源接口的装饰者
 type StorageDecorator func(
 	config *storagebackend.Config,
 	capacity int,
@@ -51,7 +52,9 @@ func UndecoratedStorage(
 // NewRawStorage creates the low level kv storage. This is a work-around for current
 // two layer of same storage interface.
 // TODO: Once cacher is enabled on all registries (event registry is special), we will remove this method.
+// 创建了一个存储后端在UndecoratedStorage和StorageWithCacher都会使用
 func NewRawStorage(config *storagebackend.Config) (storage.Interface, factory.DestroyFunc) {
+	//看一下这个创建函数
 	s, d, err := factory.Create(*config)
 	if err != nil {
 		glog.Fatalf("Unable to create storage backend: config (%v), err (%v)", config, err)

@@ -94,6 +94,8 @@ type LegacyRESTStorage struct {
 	ServiceNodePortAllocator  rangeallocation.RangeRegistry
 }
 
+// 这个函数用于创建coreGroup的资源的Storage，看一下，可以重点分析一下pod这个资源的
+// 这里比较重要的是restOptionsGetter也就是restOptionsFactory.NewFor
 func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(restOptionsGetter genericapiserver.RESTOptionsGetter) (LegacyRESTStorage, genericapiserver.APIGroupInfo, error) {
 	apiGroupInfo := genericapiserver.APIGroupInfo{
 		GroupMeta:                    *registered.GroupOrDie(api.GroupName),
@@ -142,8 +144,10 @@ func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(restOptionsGetter generi
 		return LegacyRESTStorage{}, genericapiserver.APIGroupInfo{}, err
 	}
 	restStorage.NodeRegistry = node.NewRegistry(nodeStorage.Node)
-
+	// 创建pod的storage，调用registry/core/pod/etcd中的newStorage
+	// 看一下NewStorage
 	podStorage := podetcd.NewStorage(
+		//传过去的参数，第一个参数比较重要，是一些配置参数，看一下函数
 		restOptionsGetter(api.Resource("pods")),
 		nodeStorage.KubeletConnectionInfo,
 		c.ProxyTransport,

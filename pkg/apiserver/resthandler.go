@@ -232,6 +232,7 @@ func (r *responder) Error(err error) {
 }
 
 // ListResource returns a function that handles retrieving a list of resources from a rest.Storage object.
+
 func ListResource(r rest.Lister, rw rest.Watcher, scope RequestScope, forceWatch bool, minRequestTimeout time.Duration) restful.RouteFunction {
 	return func(req *restful.Request, res *restful.Response) {
 		// For performance tracking purposes.
@@ -292,7 +293,7 @@ func ListResource(r rest.Lister, rw rest.Watcher, scope RequestScope, forceWatch
 			}
 			opts.FieldSelector = nameSelector
 		}
-
+		//这里是watch函数的分支，我们看一下这个函数
 		if (opts.Watch || forceWatch) && rw != nil {
 			watcher, err := rw.Watch(ctx, &opts)
 			if err != nil {
@@ -307,6 +308,7 @@ func ListResource(r rest.Lister, rw rest.Watcher, scope RequestScope, forceWatch
 			if timeout == 0 && minRequestTimeout > 0 {
 				timeout = time.Duration(float64(minRequestTimeout) * (rand.Float64() + 1.0))
 			}
+			// 这个函数需要看一下
 			serveWatch(watcher, scope, req, res, timeout)
 			return
 		}

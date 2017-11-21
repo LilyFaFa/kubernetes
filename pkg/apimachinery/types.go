@@ -27,15 +27,18 @@ import (
 // GroupMeta stores the metadata of a group.
 type GroupMeta struct {
 	// GroupVersion represents the preferred version of the group.
+	// 默认版本
 	GroupVersion unversioned.GroupVersion
 
 	// GroupVersions is Group + all versions in that group.
+	// group的所有版本
 	GroupVersions []unversioned.GroupVersion
 
 	// Codec is the default codec for serializing output that should use
 	// the preferred version.  Use this Codec when writing to
 	// disk, a data store that is not dynamically versioned, or in tests.
 	// This codec can decode any object that the schema is aware of.
+	// 用于编解码
 	Codec runtime.Codec
 
 	// SelfLinker can set or get the SelfLink field of all API types.

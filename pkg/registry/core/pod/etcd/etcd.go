@@ -58,12 +58,18 @@ type REST struct {
 }
 
 // NewStorage returns a RESTStorage object that will work against pods.
+// 创建一个 RESTStorage 用于
 func NewStorage(opts generic.RESTOptions, k client.ConnectionInfoGetter, proxyTransport http.RoundTripper, podDisruptionBudgetClient policyclient.PodDisruptionBudgetsGetter) PodStorage {
 	prefix := "/" + opts.ResourcePrefix
 
 	newListFunc := func() runtime.Object { return &api.PodList{} }
+	// 该接口中调用了opts.Decorator()接口返回了关键的storage interface及清除操作资源的接口。
+	// 调用接口装饰器，返回该storage的etcd操作接口及资源delete接口
+	// 该opts传参进来的，需要到上一层查看master.go下的restOptionsFactory.NewFor
+	// 看一下opts的生成
 	storageInterface, dFunc := opts.Decorator(
 		opts.StorageConfig,
+		// 这一下的参数都是用于开启cache时的接口使用
 		cachesize.GetWatchCacheSizeByResource(cachesize.Pods),
 		&api.Pod{},
 		prefix,

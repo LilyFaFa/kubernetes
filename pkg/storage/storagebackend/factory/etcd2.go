@@ -31,14 +31,17 @@ import (
 )
 
 func newETCD2Storage(c storagebackend.Config) (storage.Interface, DestroyFunc, error) {
+	// 根据配置的TLS证书信息创建http.Transport
 	tr, err := newTransportForETCD2(c.CertFile, c.KeyFile, c.CAFile)
 	if err != nil {
 		return nil, nil, err
 	}
+	// 创建etcd2 client，返回的是httpClusterClient结构
 	client, err := newETCD2Client(tr, c.ServerList)
 	if err != nil {
 		return nil, nil, err
 	}
+	// 根据入参初始化一个实现了storage.Interface接口的etcdHelper变量
 	s := etcd.NewEtcdStorage(client, c.Codec, c.Prefix, c.Quorum, c.DeserializationCacheSize)
 	return s, tr.CloseIdleConnections, nil
 }

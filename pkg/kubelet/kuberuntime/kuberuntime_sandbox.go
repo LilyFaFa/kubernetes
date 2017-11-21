@@ -33,6 +33,7 @@ import (
 
 // createPodSandbox creates a pod sandbox and returns (podSandBoxID, message, error).
 func (m *kubeGenericRuntimeManager) createPodSandbox(pod *api.Pod, attempt uint32) (string, string, error) {
+	//创建sandbox的config文件
 	podSandboxConfig, err := m.generatePodSandboxConfig(pod, attempt)
 	if err != nil {
 		message := fmt.Sprintf("GeneratePodSandboxConfig for pod %q failed: %v", format.Pod(pod), err)
@@ -41,20 +42,22 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(pod *api.Pod, attempt uint3
 	}
 
 	// Create pod logs directory
+	// 创建日志文件
 	err = m.osInterface.MkdirAll(podSandboxConfig.GetLogDirectory(), 0755)
 	if err != nil {
 		message := fmt.Sprintf("Create pod log directory for pod %q failed: %v", format.Pod(pod), err)
 		glog.Errorf(message)
 		return "", message, err
 	}
-
+	// 调用runtime创建这个sandbox,通过建立的rpc通信创建sandbox
+	// 看一下这个过程，可以看到网络的创建
 	podSandBoxID, err := m.runtimeService.RunPodSandbox(podSandboxConfig)
 	if err != nil {
 		message := fmt.Sprintf("CreatePodSandbox for pod %q failed: %v", format.Pod(pod), err)
 		glog.Error(message)
 		return "", message, err
 	}
-
+	//返回这个sandbox的Id
 	return podSandBoxID, "", nil
 }
 

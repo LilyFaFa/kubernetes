@@ -38,6 +38,7 @@ import (
 func main() {
 	rand.Seed(time.Now().UTC().UnixNano())
 
+	// 初始化ServerRunOptions对象
 	s := options.NewServerRunOptions()
 	s.AddFlags(pflag.CommandLine)
 

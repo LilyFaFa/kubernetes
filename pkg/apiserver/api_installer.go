@@ -65,12 +65,15 @@ type documentable interface {
 var errEmptyName = errors.NewBadRequest("name must be provided")
 
 // Installs handlers for API resources.
+// 用于处理api资源的
 func (a *APIInstaller) Install(ws *restful.WebService) (apiResources []unversioned.APIResource, errors []error) {
 	errors = make([]error, 0)
 
 	proxyHandler := (&ProxyHandler{
-		prefix:     a.prefix + "/proxy/",
-		storage:    a.group.Storage,
+		prefix: a.prefix + "/proxy/",
+		// 这个是对接etcd的接口，对接etcd存储,该接口就是一个通用的符合Restful要求的资源存储接口。
+		storage: a.group.Storage,
+		// 这个用于序列化
 		serializer: a.group.Serializer,
 		mapper:     a.group.Context,
 	})
@@ -83,7 +86,9 @@ func (a *APIInstaller) Install(ws *restful.WebService) (apiResources []unversion
 		i++
 	}
 	sort.Strings(paths)
+	// 遍历属于这个group-version的所有的资源，并且进行注册
 	for _, path := range paths {
+		// 对每一个资源进行注册，看一下注册函数
 		apiResource, err := a.registerResourceHandlers(path, a.group.Storage[path], ws, proxyHandler)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("error in registering resource: %s, %v", path, err))
@@ -169,6 +174,7 @@ func (a *APIInstaller) restMapping(resource string) (*meta.RESTMapping, error) {
 	return a.group.Mapper.RESTMapping(fqKindToRegister.GroupKind(), fqKindToRegister.Version)
 }
 
+// 注册资源处理函数
 func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storage, ws *restful.WebService, proxyHandler http.Handler) (*unversioned.APIResource, error) {
 	admit := a.group.Admit
 	context := a.group.Context
@@ -177,7 +183,7 @@ func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storag
 	if a.group.OptionsExternalVersion != nil {
 		optionsExternalVersion = *a.group.OptionsExternalVersion
 	}
-
+	// 从path中获取该资源和资源的子资源，如果存在子资源的话
 	resource, subresource, err := splitSubresource(path)
 	if err != nil {
 		return nil, err
@@ -202,6 +208,7 @@ func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storag
 	hasSubresource := len(subresource) > 0
 
 	// what verbs are supported by the storage, used to know what verbs we support per path
+	// 看一下这个资源支持什么样的verb
 	creater, isCreater := storage.(rest.Creater)
 	namedCreater, isNamedCreater := storage.(rest.NamedCreater)
 	lister, isLister := storage.(rest.Lister)
@@ -682,11 +689,14 @@ func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storag
 			addParams(route, action.Params)
 			ws.Route(route)
 		// TODO: deprecated
+		// 如果该资源可以被watch，我们以watch操作看一下路由注册过程
 		case "WATCH": // Watch a resource.
 			doc := "watch changes to an object of kind " + kind
 			if hasSubresource {
 				doc = "watch changes to " + subresource + " of an object of kind " + kind
 			}
+			// 生成处理函数，其中比较重要的是传入的ListResource这个function
+			// 看一下这个函数
 			handler := metrics.InstrumentRouteFunc(action.Verb, resource, ListResource(lister, watcher, reqScope, true, a.minRequestTimeout))
 			route := ws.GET(action.Path).To(handler).
 				Doc(doc).

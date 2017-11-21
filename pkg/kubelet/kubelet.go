@@ -528,6 +528,7 @@ func NewMainKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *Kub
 	glog.Infof("Hairpin mode set to %q", klet.hairpinMode)
 
 	// 网络插件的初始化工作
+	// CNI插件
 	if plug, err := network.InitNetworkPlugin(kubeDeps.NetworkPlugins, kubeCfg.NetworkPluginName, &criNetworkHost{&networkHost{klet}}, klet.hairpinMode, klet.nonMasqueradeCIDR, int(kubeCfg.NetworkPluginMTU)); err != nil {
 		return nil, err
 	} else {

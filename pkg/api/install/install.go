@@ -33,14 +33,18 @@ import (
 	"k8s.io/kubernetes/pkg/util/sets"
 )
 
+// 这个 go文件是用于初始化core这个group的，通过init函数，通过在import_known_version.go
+// 中通过 import _的方式初始化调用
 const importPrefix = "k8s.io/kubernetes/pkg/api"
 
 var accessor = meta.NewAccessor()
 
 // availableVersions lists all known external versions for this group from most preferred to least preferred
+// version就是v1，availableVersions定义了一个GroupName为空，Version是'v1'的GroupVersion
 var availableVersions = []unversioned.GroupVersion{v1.SchemeGroupVersion}
 
 func init() {
+	// 将version进行注册，存入APIRegistrationManager.registeredVersions中
 	registered.RegisterVersions(availableVersions)
 	externalVersions := []unversioned.GroupVersion{}
 	for _, v := range availableVersions {
@@ -52,11 +56,12 @@ func init() {
 		glog.V(4).Infof("No version is registered for group %v", api.GroupName)
 		return
 	}
-
+	// 将version进行enable，其实就是存入APIRegistrationManager.enabledVersions
 	if err := registered.EnableVersions(externalVersions...); err != nil {
 		glog.V(4).Infof("%v", err)
 		return
 	}
+	// 看一下 enableVersions，这个比较重要
 	if err := enableVersions(externalVersions); err != nil {
 		glog.V(4).Infof("%v", err)
 		return
@@ -68,17 +73,26 @@ func init() {
 // We can combine registered.RegisterVersions, registered.EnableVersions and
 // registered.RegisterGroup once we have moved enableVersions there.
 func enableVersions(externalVersions []unversioned.GroupVersion) error {
+	// 字面意思：将所有的Versions添加到Scheme
+	// 又牵扯到Scheme，后面会介绍Scheme的初始化
+	// 越深入看牵扯出的概念越多，该接口也很重要，需要耐心层层挖掘
 	addVersionsToScheme(externalVersions...)
+	// 将group其中的一个GroupVersion作为默认的,即'/api/v1'
 	preferredExternalVersion := externalVersions[0]
-
+	// 就是这里！ 进行了GroupMeta的初始化
 	groupMeta := apimachinery.GroupMeta{
-		GroupVersion:  preferredExternalVersion,
+		// 默认的group version
+		GroupVersion: preferredExternalVersion,
+		// 所有的group version
 		GroupVersions: externalVersions,
+		// RESTMapper也是关键所在，会介绍
 		RESTMapper:    newRESTMapper(externalVersions),
 		SelfLinker:    runtime.SelfLinker(accessor),
 		InterfacesFor: interfacesFor,
 	}
-
+	// 前面都是register和enable了versions，这里才是进行了Group的register
+	// 该接口其实就是以第一个GroupVersion的groupName为key，groupMeta为value
+	// 对APIRegistrationManager的groupMetaMap,进行了赋值
 	if err := registered.RegisterGroup(groupMeta); err != nil {
 		return err
 	}
@@ -132,6 +146,7 @@ func interfacesFor(version unversioned.GroupVersion) (*meta.VersionInterfaces, e
 
 func addVersionsToScheme(externalVersions ...unversioned.GroupVersion) {
 	// add the internal version to Scheme
+	// AddToScheme(api.Scheme)都是将GroupVersion加入到api.Scheme
 	if err := api.AddToScheme(api.Scheme); err != nil {
 		// Programmer error, detect immediately
 		panic(err)

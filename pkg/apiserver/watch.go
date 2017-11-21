@@ -105,7 +105,7 @@ func serveWatch(watcher watch.Interface, scope RequestScope, req *restful.Reques
 
 		t: &realTimeoutFactory{timeout},
 	}
-
+	//watch这个api涉及到的http
 	server.ServeHTTP(res.ResponseWriter, req.Request)
 }
 
@@ -133,7 +133,9 @@ type WatchServer struct {
 // or over a websocket connection.
 func (s *WatchServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w = httplog.Unlogged(w)
-
+	// 首先会查看发送来的请求是不是要求使用websocket，即wsstream.IsWebSocketRequest(req)，
+	// 假如是的话就通过websocket向client发送watch event，
+	// 也就是说kube-apiserver是支持通过websocket向客户端发送watch event的。
 	if wsstream.IsWebSocketRequest(req) {
 		w.Header().Set("Content-Type", s.mediaType)
 		websocket.Handler(s.HandleWS).ServeHTTP(w, req)
@@ -171,6 +173,9 @@ func (s *WatchServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	defer s.watching.Stop()
 
 	// begin the stream
+	// 假如不是webhook的话，则首先设置http返回头，Content-Type设置为s.MediaType，一般为json，
+	// 同时设置Transfer-Encoding为chunked，设置返回码为200(StatusOK)，
+	// 和我们从API分析那一节获取的信息一样，首先会返回一个200的状态吗。
 	w.Header().Set("Content-Type", s.mediaType)
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.WriteHeader(http.StatusOK)
@@ -186,12 +191,13 @@ func (s *WatchServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		case <-timeoutCh:
 			return
+		//从channel中获取event数据，这个channel中的数据怎么来的需要看一下
 		case event, ok := <-ch:
 			if !ok {
 				// End of results.
 				return
 			}
-
+			// 序列化事件
 			obj := event.Object
 			s.fixup(obj)
 			if err := s.embeddedEncoder.Encode(obj, buf); err != nil {
@@ -206,6 +212,7 @@ func (s *WatchServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			event.Object = &unknown
 
 			// the internal event will be versioned by the encoder
+			// 发送数据
 			*internalEvent = versioned.InternalEvent(event)
 			if err := e.Encode(internalEvent); err != nil {
 				utilruntime.HandleError(fmt.Errorf("unable to encode watch object: %v (%#v)", err, e))

@@ -126,6 +126,8 @@ type ServerRunOptions struct {
 	WatchCacheSizes        []string
 }
 
+// 初始化ServerRunOptions对象,用到了DefaultAPIRegistrationManager的对象，看一下
+// registered.AllPreferredGroupVersions()
 func NewServerRunOptions() *ServerRunOptions {
 	return &ServerRunOptions{
 		AdmissionControl:                         "AlwaysAdmit",

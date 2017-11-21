@@ -73,7 +73,8 @@ func (r *RemoteRuntimeService) Version(apiVersion string) (*runtimeApi.VersionRe
 func (r *RemoteRuntimeService) RunPodSandbox(config *runtimeApi.PodSandboxConfig) (string, error) {
 	ctx, cancel := getContextWithTimeout(r.timeout)
 	defer cancel()
-
+	//创建一个rpc通信
+	//创建podSandbox，可以找一个runtime看一下
 	resp, err := r.runtimeClient.RunPodSandbox(ctx, &runtimeApi.RunPodSandboxRequest{
 		Config: config,
 	})

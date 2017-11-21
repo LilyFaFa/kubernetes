@@ -17,6 +17,8 @@ limitations under the License.
 package master
 
 // These imports are the API groups the API server will support.
+// 这里是用于注册apiserver支持的group，其中pkg/api是core group的其余的都是其他的group的
+// 初始化。这里一共有13个group，可以举例看一下core group
 import (
 	"fmt"
 

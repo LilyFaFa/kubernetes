@@ -42,16 +42,22 @@ import (
 
 // Creates a new storage interface from the client
 // TODO: deprecate in favor of storage.Config abstraction over time
+// 创建一个etcd的存储接口
 func NewEtcdStorage(client etcd.Client, codec runtime.Codec, prefix string, quorum bool, cacheSize int) storage.Interface {
 	return &etcdHelper{
+		// 创建一个httpMembersAPI变量，附带很多方法
 		etcdMembersAPI: etcd.NewMembersAPI(client),
-		etcdKeysAPI:    etcd.NewKeysAPI(client),
-		codec:          codec,
-		versioner:      APIObjectVersioner{},
-		copier:         api.Scheme,
-		pathPrefix:     path.Join("/", prefix),
-		quorum:         quorum,
-		cache:          utilcache.NewCache(cacheSize),
+		// 创建一个httpKeysAPI变量，同样附带各类方法
+		etcdKeysAPI: etcd.NewKeysAPI(client),
+		// 编解码使用
+		codec:     codec,
+		versioner: APIObjectVersioner{},
+		// 用于序列化反序列化，版本间转换，兼容等
+		copier:     api.Scheme,
+		pathPrefix: path.Join("/", prefix),
+		quorum:     quorum,
+		// 创建cache结构
+		cache: utilcache.NewCache(cacheSize),
 	}
 }
 
