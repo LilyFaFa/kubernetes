@@ -652,9 +652,9 @@ type binder struct {
 }
 
 // Bind just does a POST binding RPC.
-//给apiserver发起请求，创建binding对象，
-//不过这里非常需要指出的是，这个请求在apiserver端并没有真正在etcd中创建binding对象，
-//而是为pod指定了node name，并且更新pod到etcd。
+// 给apiserver发起请求，创建binding对象，
+// 不过这里非常需要指出的是，这个请求在apiserver端并没有真正在etcd中创建binding对象，
+// 而是为pod指定了node name，并且更新pod到etcd。
 func (b *binder) Bind(binding *api.Binding) error {
 	glog.V(3).Infof("Attempting to bind %v to %v", binding.Name, binding.Target.Name)
 	ctx := api.WithNamespace(api.NewContext(), binding.Namespace)

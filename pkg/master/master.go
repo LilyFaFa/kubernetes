@@ -200,7 +200,8 @@ func (c completedConfig) New() (*Master, error) {
 	if reflect.DeepEqual(c.KubeletClientConfig, kubeletclient.KubeletClientConfig{}) {
 		return nil, fmt.Errorf("Master.New() called with empty config.KubeletClientConfig")
 	}
-	//这个New函数也是比较重要可以看一下
+	// 这个New函数可以看一下
+	// 生成了server这个参数，也就是GenericAPIServer
 	s, err := c.Config.GenericConfig.SkipComplete().New() // completion is done in Complete, no need for a second time
 	if err != nil {
 		return nil, err
@@ -218,9 +219,9 @@ func (c completedConfig) New() (*Master, error) {
 	}
 
 	restOptionsFactory := restOptionsFactory{
-		//最大的删除资源的携程数
+		// 最大的删除资源的携程数
 		deleteCollectionWorkers: c.DeleteCollectionWorkers,
-		//是否使能GC
+		// 是否使能GC
 		enableGarbageCollection: c.GenericConfig.EnableGarbageCollection,
 		storageFactory:          c.StorageFactory,
 	}
@@ -273,7 +274,8 @@ func (c completedConfig) New() (*Master, error) {
 	return m, nil
 }
 
-// /api资源的注册
+// /api资源的注册这个是 /api资源注册使用的，下面是 /apis注册使用的
+// 第二个参数就是restOptionFactory.NewFor
 func (m *Master) InstallLegacyAPI(c *Config, restOptionsGetter genericapiserver.RESTOptionsGetter, legacyRESTStorageProvider corerest.LegacyRESTStorageProvider) {
 	// 这个地方是向etcd 建立注册资源关系，创建storage，需要看一下
 	legacyRESTStorage, apiGroupInfo, err := legacyRESTStorageProvider.NewLegacyRESTStorage(restOptionsGetter)
@@ -288,7 +290,7 @@ func (m *Master) InstallLegacyAPI(c *Config, restOptionsGetter genericapiserver.
 			glog.Fatalf("Error registering PostStartHook %q: %v", "bootstrap-controller", err)
 		}
 	}
-	// 这个是install函数，用于注册core group的资源
+	// 这个是install函数，用于注册core group的资源，也就是 /api资源，进去之后会检测这个前缀
 	if err := m.GenericAPIServer.InstallLegacyAPIGroup(genericapiserver.DefaultLegacyAPIPrefix, &apiGroupInfo); err != nil {
 		glog.Fatalf("Error in registering group versions: %v", err)
 	}

@@ -118,6 +118,7 @@ func Run(s *options.ServerRunOptions) error {
 	if len(s.SSHUser) > 0 {
 		// Get ssh key distribution func, if supported
 		var installSSH genericapiserver.InstallSSHKey
+		//初始化cloudProvider
 		cloud, err := cloudprovider.InitCloudProvider(s.GenericServerRunOptions.CloudProvider, s.GenericServerRunOptions.CloudConfigFile)
 		if err != nil {
 			glog.Fatalf("Cloud provider could not be initialized: %v", err)
@@ -351,6 +352,8 @@ func Run(s *options.ServerRunOptions) error {
 		cachesize.SetWatchCacheSizes(s.GenericServerRunOptions.WatchCacheSizes)
 	}
 
+	// 填充config字段，并且运行New函数，重点看，返回master.
+	// 后文是运行master并且使用wait.NerverStop一直运行.
 	m, err := config.Complete().New()
 	if err != nil {
 		return err

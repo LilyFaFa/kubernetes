@@ -211,12 +211,14 @@ func (s *GenericAPIServer) PrepareRun() preparedGenericAPIServer {
 // or one of the ports cannot be listened on initially.
 func (s preparedGenericAPIServer) Run(stopCh <-chan struct{}) {
 	if s.SecureServingInfo != nil && s.Handler != nil {
+		//运行安全的http server
 		if err := s.serveSecurely(stopCh); err != nil {
 			glog.Fatal(err)
 		}
 	}
 
 	if s.InsecureServingInfo != nil && s.InsecureHandler != nil {
+		//运行不安全的http server
 		if err := s.serveInsecurely(stopCh); err != nil {
 			glog.Fatal(err)
 		}
@@ -234,8 +236,9 @@ func (s preparedGenericAPIServer) Run(stopCh <-chan struct{}) {
 
 // installAPIResources is a private method for installing the REST storage backing each api groupversionresource
 func (s *GenericAPIServer) installAPIResources(apiPrefix string, apiGroupInfo *APIGroupInfo) error {
-	// 遍历该group支持的version
+	// 遍历该 group 支持的 version
 	for _, groupVersion := range apiGroupInfo.GroupMeta.GroupVersions {
+		// apiGroupVersion 这个变量比较重要可以好好看看，后面调用InstallREST也是这个变量
 		apiGroupVersion, err := s.getAPIGroupVersion(apiGroupInfo, groupVersion, apiPrefix)
 		if err != nil {
 			return err
@@ -243,7 +246,7 @@ func (s *GenericAPIServer) installAPIResources(apiPrefix string, apiGroupInfo *A
 		if apiGroupInfo.OptionsExternalVersion != nil {
 			apiGroupVersion.OptionsExternalVersion = apiGroupInfo.OptionsExternalVersion
 		}
-		// 对该group version的资源进行注册
+		// 对该 group version 的资源进行注册
 		// The registered APIs ==== HandlerContainer *genericmux.APIContainer
 		// 看一下这个函数
 		if err := apiGroupVersion.InstallREST(s.HandlerContainer.Container); err != nil {
@@ -255,6 +258,7 @@ func (s *GenericAPIServer) installAPIResources(apiPrefix string, apiGroupInfo *A
 }
 
 func (s *GenericAPIServer) InstallLegacyAPIGroup(apiPrefix string, apiGroupInfo *APIGroupInfo) error {
+	//检测前缀是不是 /api
 	if !s.legacyAPIGroupPrefixes.Has(apiPrefix) {
 		return fmt.Errorf("%q is not in the allowed legacy API prefixes: %v", apiPrefix, s.legacyAPIGroupPrefixes.List())
 	}

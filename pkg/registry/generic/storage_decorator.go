@@ -53,8 +53,10 @@ func UndecoratedStorage(
 // two layer of same storage interface.
 // TODO: Once cacher is enabled on all registries (event registry is special), we will remove this method.
 // 创建了一个存储后端在UndecoratedStorage和StorageWithCacher都会使用
+// 一旦所有的registry的cacher都被使能，那么就会放弃UndecoratedStorage
 func NewRawStorage(config *storagebackend.Config) (storage.Interface, factory.DestroyFunc) {
 	//看一下这个创建函数
+	// 主要看使用的是etcd2还是etcd3
 	s, d, err := factory.Create(*config)
 	if err != nil {
 		glog.Fatalf("Unable to create storage backend: config (%v), err (%v)", config, err)

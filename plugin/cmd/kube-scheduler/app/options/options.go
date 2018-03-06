@@ -33,9 +33,11 @@ type SchedulerServer struct {
 	componentconfig.KubeSchedulerConfiguration
 	// Master is the address of the Kubernetes API server (overrides any
 	// value in kubeconfig).
+	// 链接apiserver的地址
 	Master string
 	// Kubeconfig is Path to kubeconfig file with authorization and master
 	// location information.
+	// 认证文件kubeconfig的地址
 	Kubeconfig string
 	// Dynamic conifguration for scheduler features.
 }

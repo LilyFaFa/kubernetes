@@ -209,6 +209,7 @@ func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storag
 
 	// what verbs are supported by the storage, used to know what verbs we support per path
 	// 看一下这个资源支持什么样的verb
+	// 这个是一个接口转换的过程，creater是转换之后的类型
 	creater, isCreater := storage.(rest.Creater)
 	namedCreater, isNamedCreater := storage.(rest.NamedCreater)
 	lister, isLister := storage.(rest.Lister)

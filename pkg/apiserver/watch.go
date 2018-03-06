@@ -136,6 +136,7 @@ func (s *WatchServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// 首先会查看发送来的请求是不是要求使用websocket，即wsstream.IsWebSocketRequest(req)，
 	// 假如是的话就通过websocket向client发送watch event，
 	// 也就是说kube-apiserver是支持通过websocket向客户端发送watch event的。
+	// 如果不是就使用后面的代码
 	if wsstream.IsWebSocketRequest(req) {
 		w.Header().Set("Content-Type", s.mediaType)
 		websocket.Handler(s.HandleWS).ServeHTTP(w, req)
@@ -229,6 +230,7 @@ func (s *WatchServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 // HandleWS implements a websocket handler.
+// websocket处理
 func (s *WatchServer) HandleWS(ws *websocket.Conn) {
 	defer ws.Close()
 	done := make(chan struct{})

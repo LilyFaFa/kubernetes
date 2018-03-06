@@ -29,10 +29,11 @@ type DestroyFunc func()
 // Create creates a storage backend based on given config.
 // 根据config创建一个存储后端
 func Create(c storagebackend.Config) (storage.Interface, DestroyFunc, error) {
-	//判断存储类型是etcd2还是etcd3
+	// 判断存储类型是etcd2还是etcd3
 	switch c.Type {
+	// 默认使用etcd2
 	case storagebackend.StorageTypeUnset, storagebackend.StorageTypeETCD2:
-		//看一下创建etcd2存储后端的过程
+		// 看一下创建etcd2存储后端的过程
 		return newETCD2Storage(c)
 	case storagebackend.StorageTypeETCD3:
 		// TODO: We have the following features to implement:

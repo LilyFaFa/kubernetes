@@ -77,6 +77,7 @@ func Run(s *options.SchedulerServer) error {
 	} else {
 		glog.Errorf("unable to register configz: %s", err)
 	}
+	// 创建链接apiserver的链接信息
 	kubeconfig, err := clientcmd.BuildConfigFromFlags(s.Master, s.Kubeconfig)
 	if err != nil {
 		glog.Errorf("unable to build config from flags: %v", err)
@@ -97,8 +98,9 @@ func Run(s *options.SchedulerServer) error {
 	}
 
 	go func() {
-		//启动http服务，方便通过/debug/pprof接口进行性能数据收集调优；
-		//metrics接口用于供prometheus收集监控数据
+		// 启动http服务，方便通过/debug/pprof接口进行性能数据收集调优；
+		// metrics接口用于供prometheus收集监控数据
+		// 注册初始化的一些路由，包括安全检查
 		mux := http.NewServeMux()
 		healthz.InstallHandler(mux)
 		if s.EnableProfiling {
@@ -123,18 +125,35 @@ func Run(s *options.SchedulerServer) error {
 		glog.Fatalf("Failed to create scheduler configuration: %v", err)
 	}
 
-	//创建一个事件广播
+	// 创建一个事件广播
+	// 1、 一些初始化的工作，配置 eventBroadcaster，这样就能给apiserver发送事件了
+	// 创建一个事件广播器
 	eventBroadcaster := record.NewBroadcaster()
-	//创建一个Recorder，可以用于写入event
+	// 创建一个Recorder，可以用于写入event
+	// 事件机制
+	// NewRecorder 新建了一个 Recoder 对象，通过它的 Event、Eventf 和 PastEventf 方法，用户可以往里面发送事件
+	// 指明事件的来源是shedular以及所在的host机器
+	// eventBroadcaster是一个 EventBroadcaster实例，包含一个Broadcaster对象，这个对象有watchers，消息管道。
+	// eventBroadcaster创建一个 EventRecorder实例给kubeDeps.Recorder，这个EventRecorder实例也包含一个Broadcaster对象，
+	// eventBroadcaster直接将自己的Broadcaster对象给了过去。
+	// 这样kubeDeps.Recorder通过Eventf等写的消息就可以直接到 eventBroadcaster的Broadcaster对象中，然后就可以发送给watchers
+	// watchers就可以处理这些events
 	config.Recorder = eventBroadcaster.NewRecorder(api.EventSource{Component: s.SchedulerName})
-	//创建两个watcher
+	// 创建两个watcher
+	// StartLogging 和 StartRecordingToSink创建了两个不同的事件处理函数，
+	// 分别把事件记录到日志和发送给 apiserver
+	// eventBroadcaster 会把接收到的事件发送个多个处理函数，
+	// 比如这里提到的写日志和发送到 apiserver
+	// 消息会被多个watcher监听
+	// 创建一个watcher用于写日志
 	eventBroadcaster.StartLogging(glog.Infof)
+	// 创建一个watcher并且开启一go线程不断读取channel并进行处理
 	eventBroadcaster.StartRecordingToSink(&unversionedcore.EventSinkImpl{Interface: leaderElectionClient.Core().Events("")})
-	//创建一个sheduler
+	// 创建一个sheduler
 	sched := scheduler.New(config)
 
 	run := func(_ <-chan struct{}) {
-		//运行scheduler，重点
+		// 运行scheduler，重点，需要看一下
 		sched.Run()
 		select {}
 	}

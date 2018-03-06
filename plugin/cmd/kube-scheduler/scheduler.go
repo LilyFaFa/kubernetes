@@ -32,6 +32,7 @@ func init() {
 }
 
 func main() {
+	//创建和一个server
 	s := options.NewSchedulerServer()
 	s.AddFlags(pflag.CommandLine)
 

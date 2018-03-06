@@ -79,6 +79,7 @@ func New(c *Config) *Scheduler {
 	s := &Scheduler{
 		config: c,
 	}
+	// 注册普罗米修斯事件收集
 	metrics.Register()
 	return s
 }

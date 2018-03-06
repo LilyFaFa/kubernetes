@@ -43,6 +43,7 @@ func newETCD2Storage(c storagebackend.Config) (storage.Interface, DestroyFunc, e
 	}
 	// 根据入参初始化一个实现了storage.Interface接口的etcdHelper变量
 	s := etcd.NewEtcdStorage(client, c.Codec, c.Prefix, c.Quorum, c.DeserializationCacheSize)
+	// 关掉与etcd的链接作为一个清理函数
 	return s, tr.CloseIdleConnections, nil
 }
 
