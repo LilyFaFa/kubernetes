@@ -145,6 +145,7 @@ func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(restOptionsGetter generi
 	}
 	restStorage.NodeRegistry = node.NewRegistry(nodeStorage.Node)
 	// 创建pod的storage，调用registry/core/pod/etcd中的newStorage
+	// 以这个为例看一下
 	// 看一下NewStorage
 	podStorage := podetcd.NewStorage(
 		//传过去的参数，第一个参数比较重要，是一些配置参数，看一下函数

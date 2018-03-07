@@ -103,14 +103,17 @@ func Run(s *options.SchedulerServer) error {
 		// 注册初始化的一些路由，包括安全检查
 		mux := http.NewServeMux()
 		healthz.InstallHandler(mux)
+		// 如果配置中配置可调试分析，则注册调试分析的路由（web端直接可以调用）
 		if s.EnableProfiling {
 			mux.HandleFunc("/debug/pprof/", pprof.Index)
 			mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 			mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		}
 		configz.InstallHandler(mux)
+		//注册普罗米修斯指标检测的路由
 		mux.Handle("/metrics", prometheus.Handler())
 
+		//开起一个httserver的服务端监听以上路由
 		server := &http.Server{
 			Addr:    net.JoinHostPort(s.Address, strconv.Itoa(int(s.Port))),
 			Handler: mux,

@@ -227,7 +227,7 @@ func (c completedConfig) New() (*Master, error) {
 	}
 	// 判断是否使能了用于Watch的Cache
 	// 有无cache赋值的是不同的接口实现
-	// restOptionsFactory.storageDecorator ：是一个各个资源的REST interface(CRUD)装饰者
+	// restOptionsFactory.storageDecorator ：是一个各个资源的REST interface(CRUD)装饰器
 	// 后面调用NewStorage()时会用到该接口，并输出对应的CRUD接口及销毁接口。
 	// 可以参考pkg/registry/core/pod/etcd/etcd.go中的NewStorage()
 	// 其实这里有无cache的接口差异就在于：有cache的话，就提供操作cache的接口；无cache的话，就提供直接操作etcd的接口
@@ -238,7 +238,7 @@ func (c completedConfig) New() (*Master, error) {
 	}
 
 	// install legacy rest storage
-	// /api这个资源的注册
+	// api 这个资源的注册
 	if c.GenericConfig.APIResourceConfigSource.AnyResourcesForVersionEnabled(apiv1.SchemeGroupVersion) {
 		legacyRESTStorageProvider := corerest.LegacyRESTStorageProvider{
 			StorageFactory:       c.StorageFactory,
@@ -252,7 +252,7 @@ func (c completedConfig) New() (*Master, error) {
 		//restOptionsFactory.NewFor接口一直被往下传，直到NewLegacyRESTStorage()接口中被调用然后创建了opts，
 		m.InstallLegacyAPI(c.Config, restOptionsFactory.NewFor, legacyRESTStorageProvider)
 	}
-	// /apis这个资源的注册
+	// apis 这个资源的注册
 	restStorageProviders := []genericapiserver.RESTStorageProvider{
 		appsrest.RESTStorageProvider{},
 		authenticationrest.RESTStorageProvider{Authenticator: c.GenericConfig.Authenticator},
@@ -278,6 +278,7 @@ func (c completedConfig) New() (*Master, error) {
 // 第二个参数就是restOptionFactory.NewFor
 func (m *Master) InstallLegacyAPI(c *Config, restOptionsGetter genericapiserver.RESTOptionsGetter, legacyRESTStorageProvider corerest.LegacyRESTStorageProvider) {
 	// 这个地方是向etcd 建立注册资源关系，创建storage，需要看一下
+	// 每一类资源对应一个storage对象
 	legacyRESTStorage, apiGroupInfo, err := legacyRESTStorageProvider.NewLegacyRESTStorage(restOptionsGetter)
 	if err != nil {
 		glog.Fatalf("Error building core storage: %v", err)

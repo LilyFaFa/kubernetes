@@ -165,6 +165,7 @@ func Run(s *options.ServerRunOptions) error {
 		// be used for the deserialization cache and divide it by the max object
 		// size to compute its size. We may even go further and measure
 		// collective sizes of the objects in the cache.
+		// 从内存容量推测节点的最大数量，每个节点默认需要60M内存
 		clusterSize := s.GenericServerRunOptions.TargetRAMMB / 60
 		s.GenericServerRunOptions.StorageConfig.DeserializationCacheSize = 25 * clusterSize
 		if s.GenericServerRunOptions.StorageConfig.DeserializationCacheSize < 1000 {
